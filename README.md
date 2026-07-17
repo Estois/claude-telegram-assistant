@@ -235,6 +235,43 @@ Message your bot on Telegram with the password first (see Accounts below)
 to unlock a session, then try `/news cybersecurity` or `/help` for the
 full command list.
 
+## Testing
+
+Unit tests live in `tests/`, one file per class under test, written as
+plain `unittest.TestCase` subclasses (stdlib only — no extra dependency
+needed to run them). Run the whole suite with:
+
+```bash
+python -m unittest discover -s tests
+```
+
+That's also exactly what VS Code's Testing sidebar runs (see
+`.vscode/settings.json`), so results match between the CLI and the
+editor. Run a single file by narrowing the discovery pattern (plain
+`python -m unittest tests.test_account_store` looks like it should work
+but doesn't — see the import note below):
+
+```bash
+python -m unittest discover -s tests -p "test_account_store.py"
+```
+
+Shared test helpers (a `BotTestCase` base class providing a scratch temp
+directory per test, plus small fixture-builder functions) live in
+`tests/helpers.py`, imported directly as `from helpers import ...`.
+That only resolves with `-s tests` explicitly given, as above — a bare
+`python -m unittest discover` from the repo root finds zero tests
+(`tests/` has no `__init__.py`, so default discovery doesn't descend
+into it), and adding `__init__.py` to fix that would break the `from
+helpers import ...` imports the other way instead (`tests` would become
+a real package, so `helpers` would only resolve as `tests.helpers`).
+`-s tests` is the one invocation that makes both sides work, which is
+exactly what `.vscode/settings.json` is configured to do.
+
+The suite also happens to run under `pytest tests/` if you have it
+installed (`pip install -r requirements-dev.txt`) — useful for local
+experimentation — but `unittest` via the command above is the supported,
+zero-extra-dependency way to run tests here.
+
 ## Running with Docker
 
 Alternative to the venv setup above — runs the bot in a container instead.
