@@ -59,20 +59,20 @@ class RunClaudeUsageLimitTests(AsyncBotTestCase):
     def _make_bot(self):
         return bot.NewsBot(make_config(self.tmp_path))
 
-    async def test_successful_reply_mentioning_usage_limit_is_replaced(self):
+    async def test_successful_reply_mentioning_usage_limit_passes_through_unchanged(self):
+        # A legitimate digest may discuss usage limits as a topic. A
+        # successful (exit-0) reply must never be second-guessed and swapped
+        # for a fake usage-limit notice — usage limits are detected only on
+        # the CLI's failure path (see test_raised_usage_limit_error_*).
         news_bot = self._make_bot()
-        news_bot._claude = FakeClaudeClient(
-            result="I couldn't finish the web search — usage limit reached. It resets at 5pm UTC."
-        )
+        digest = "OpenAI raised its API usage limit. The new usage limit resets monthly."
+        news_bot._claude = FakeClaudeClient(result=digest)
         update = FakeUpdate(user_id=1, chat_id=1)
 
         reply = await news_bot._run_claude(update, FakeContext(), "some prompt")
 
-        self.assertIsNone(reply)
-        self.assertEqual(len(update.message.replies), 1)
-        sent = update.message.replies[0]
-        self.assertNotIn("web search", sent)
-        self.assertIn("5pm UTC", sent)
+        self.assertEqual(reply, digest)
+        self.assertEqual(update.message.replies, [])
 
     async def test_raised_usage_limit_error_is_replaced(self):
         news_bot = self._make_bot()

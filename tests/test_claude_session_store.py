@@ -65,6 +65,22 @@ class ClaudeSessionStoreTests(BotTestCase):
         self.assertEqual(store.get(chat_id=1), "session-one")
         self.assertEqual(store.get(chat_id=2), "session-two")
 
+    def test_get_returns_none_for_corrupt_file_instead_of_crashing(self):
+        path = self.tmp_path / "sessions.json"
+        path.write_text("{corrupt")
+        store = bot.ClaudeSessionStore(path)
+
+        self.assertIsNone(store.get(chat_id=1))
+
+    def test_set_recovers_from_a_corrupt_file(self):
+        path = self.tmp_path / "sessions.json"
+        path.write_text("{corrupt")
+        store = bot.ClaudeSessionStore(path)
+
+        store.set(chat_id=1, session_id="abc-123")
+
+        self.assertEqual(store.get(chat_id=1), "abc-123")
+
 
 if __name__ == "__main__":
     import unittest

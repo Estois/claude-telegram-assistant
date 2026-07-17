@@ -335,9 +335,16 @@ class ClaudeSessionStore:
         return True
 
     def _read(self) -> dict:
-        if self._path.exists():
+        if not self._path.exists():
+            return {}
+        try:
             return json.loads(self._path.read_text())
-        return {}
+        except json.JSONDecodeError:
+            # Degrade gracefully rather than crash every command until the
+            # file is hand-fixed — a fresh _write repairs it. Matches how
+            # TriviaBook/BusStopsCache/BusLocationsStore treat corruption.
+            logger.exception("%s is corrupt", self._path)
+            return {}
 
     def _write(self, sessions: dict) -> None:
         self._path.write_text(json.dumps(sessions, indent=2))
@@ -1596,10 +1603,13 @@ class NewsBot:
         Telegram chat's own Claude session by default; pass chat_id to
         target a different one (e.g. an account's maintenance session).
         Returns None if a busy/usage-limit/error message was already sent to
-        the user and the caller should stop — including when Claude's own
-        reply text (not just a hard failure) says it hit its usage limit,
-        e.g. mid-way through a news search; the caller never sees that raw
-        wording, just the generic reset notice."""
+        the user and the caller should stop.
+
+        Usage-limit detection lives only on the failure path (the CLI exits
+        non-zero when it hits a limit — its authoritative signal). A
+        successful reply is never second-guessed, so a legitimate digest
+        that merely discusses usage limits as a topic is passed through
+        untouched instead of being mistaken for a limit notice."""
         telegram_chat_id = update.effective_chat.id
         claude_chat_id = chat_id if chat_id is not None else telegram_chat_id
 
@@ -1611,19 +1621,13 @@ class NewsBot:
         async with lock:
             keep_typing = asyncio.create_task(self._keep_typing(context, telegram_chat_id))
             try:
-                reply = await self._claude.run(claude_chat_id, prompt)
+                return await self._claude.run(claude_chat_id, prompt)
             except Exception as exc:
                 logger.exception("claude invocation failed")
                 await self._reply_to_claude_failure(update, exc)
                 return None
             finally:
                 keep_typing.cancel()
-
-        reset_notice = self._usage_limit_reset_notice(reply)
-        if reset_notice is not None:
-            await update.message.reply_text(self._build_usage_limit_message(reset_notice))
-            return None
-        return reply
 
     async def _send_formatted(self, update: Update, text: str) -> None:
         """Sends Claude's reply, chunked for Telegram's message limit. Tries
@@ -1651,33 +1655,37 @@ class NewsBot:
     async def _on_startup(self, app: Application) -> None:
         interval = self._config.interests_reorganize_interval_seconds
         if interval > 0:
-            self._reorganize_task = asyncio.create_task(self._reorganize_loop(app, interval))
+            self._reorganize_task = asyncio.create_task(self._reorganize_loop(interval))
 
     async def _on_shutdown(self, app: Application) -> None:
         if self._reorganize_task:
             self._reorganize_task.cancel()
 
-    async def _reorganize_loop(self, app: Application, interval_seconds: int) -> None:
+    async def _reorganize_loop(self, interval_seconds: int) -> None:
         try:
             while True:
                 await asyncio.sleep(interval_seconds)
                 try:
-                    await self._reorganize_interests(app)
+                    await self._reorganize_interests()
                 except Exception:
                     logger.exception("Interests reorganization failed")
         except asyncio.CancelledError:
             pass
 
-    async def _reorganize_interests(self, app: Application) -> None:
+    async def _reorganize_interests(self) -> None:
         for account_id in self._accounts.list_ids():
             try:
-                await self._reorganize_account(app, account_id)
+                await self._reorganize_account(account_id)
             except Exception:
                 logger.exception("Interests reorganization failed for account %s", account_id)
 
-    async def _reorganize_account(self, app: Application, account_id: str) -> None:
+    async def _reorganize_account(self, account_id: str) -> None:
         # Shares the maintenance lock with /compileinterests (for this
         # account) so the two never run the same Claude session concurrently.
+        # The result is logged, not broadcast: pushing one account's
+        # reorganize summary to every allowlisted Telegram user would leak
+        # that account's id and interest counts across users. The owner
+        # sees the fresh list on their next /getinterests.
         maintenance_key = self._maintenance_key(account_id)
         async with self._claude.lock_for(maintenance_key):
             interests = self._interests_for(account_id)
@@ -1697,24 +1705,6 @@ class NewsBot:
 
             interests.replace_all(new_entries)
             logger.info("Reorganized interests for %s: %d -> %d entries", account_id, len(entries), len(new_entries))
-
-        await self._notify_reorganized(app, account_id, len(entries), len(new_entries))
-
-    async def _notify_reorganized(
-        self, app: Application, account_id: str, before_count: int, after_count: int
-    ) -> None:
-        allowed = self._allowlist.ids
-        if not allowed:
-            return
-        summary = (
-            f"🗂 [{account_id}] Reorganized interests: {before_count} → {after_count} "
-            "entries. See /getinterests."
-        )
-        for user_id in allowed:
-            try:
-                await app.bot.send_message(chat_id=user_id, text=summary)
-            except Exception:
-                logger.exception("Failed to notify chat %s about reorganized interests", user_id)
 
 
 def main() -> None:

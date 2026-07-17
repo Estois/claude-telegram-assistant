@@ -39,9 +39,11 @@ background job runs once per account: it sends that account's interests
 list to Claude, which merges duplicate or overlapping entries and adds a
 short blurb of extra detail to entries where that would help `/news`
 retrieve more relevant results — without inventing interests the list
-doesn't already imply. Runs automatically; each allowed user gets a
-one-line Telegram notification (tagged with the account id) when an
-account's list changes. Set the interval to `0` to disable it. Run
+doesn't already imply. Runs automatically and silently — the result is
+recorded in the log, not pushed to Telegram (broadcasting one account's
+reorganize summary to every allowed user would leak its id and interest
+counts across accounts); you'll simply see the updated list next time you
+run `/getinterests`. Set the interval to `0` to disable it. Run
 `/compileinterests` to trigger the same pass on demand for your own
 account — it shares a lock with the background job so the two never run
 concurrently and step on each other's edits. Its reply includes the full
