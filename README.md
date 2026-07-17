@@ -137,6 +137,14 @@ usually come in direction-opposite pairs across a road, so picking from a
 short list beats guessing from the single nearest one. Tapping any stop
 button (preset or nearby) fetches and displays live arrivals for it.
 
+The arrivals screen itself has a second button: "⭐ Add as preferred" for a
+stop not already in `bus_locations.json`, or "🗑 Remove from preferred" for
+one that is — tapping it edits the file directly and flips the button, so
+you can toggle a stop in or out without leaving Telegram. Added names are
+auto-derived from the stop's description in `bus_stops_cache.json` (e.g.
+"Opp Parkway East Hosp (83159)"), falling back to just the stop code if
+that cache isn't built yet.
+
 ## Setup
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token it gives you.

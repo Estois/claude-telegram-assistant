@@ -664,6 +664,9 @@ class BusStopsCache:
         stops.sort(key=lambda s: s["distance_m"])
         return stops[:count]
 
+    def find_by_code(self, code: str) -> Optional[dict]:
+        return next((s for s in self._load() if s["BusStopCode"] == code), None)
+
     def _load(self) -> list:
         if not self._cache_file.exists():
             return []
@@ -684,8 +687,9 @@ class BusStopsCache:
 
 
 class BusLocationsStore:
-    """Read-only loader for the name -> bus stop code mapping shown as
-    /bus's preset location buttons. Hand-edited directly on disk."""
+    """Manages the name -> bus stop code mapping shown as /bus's preset
+    location buttons. Hand-editable, and also written to directly when a
+    stop is added/removed as preferred from the bot."""
 
     def __init__(self, path: Path):
         self._path = path
@@ -698,6 +702,29 @@ class BusLocationsStore:
         except json.JSONDecodeError:
             logger.exception("%s is corrupt", self._path)
             return {}
+
+    def has_code(self, code: str) -> bool:
+        return code in self.list().values()
+
+    def add(self, name: str, code: str) -> None:
+        locations = self.list()
+        locations[name] = code
+        self._write(locations)
+
+    def remove_by_code(self, code: str) -> bool:
+        """Removes every entry pointing at this stop code. Returns whether
+        anything was removed."""
+        locations = self.list()
+        names = [name for name, stop_code in locations.items() if stop_code == code]
+        if not names:
+            return False
+        for name in names:
+            del locations[name]
+        self._write(locations)
+        return True
+
+    def _write(self, locations: dict) -> None:
+        self._path.write_text(json.dumps(locations, indent=2))
 
 
 class NewsBot:
@@ -758,6 +785,8 @@ class NewsBot:
         app.add_handler(CommandHandler("compileinterests", self.handle_compile_interests))
         app.add_handler(CommandHandler("bus", self.handle_bus))
         app.add_handler(CallbackQueryHandler(self.handle_bus_callback, pattern=r"^bus_stop:"))
+        app.add_handler(CallbackQueryHandler(self.handle_bus_fav_add, pattern=r"^bus_fav_add:"))
+        app.add_handler(CallbackQueryHandler(self.handle_bus_fav_remove, pattern=r"^bus_fav_remove:"))
         app.add_handler(
             CallbackQueryHandler(self.handle_bus_request_location, pattern=r"^bus_request_location$")
         )
@@ -1025,7 +1054,57 @@ class NewsBot:
         await query.answer()
         stop_code = query.data.split(":", 1)[1]
         text = await self._format_arrivals(stop_code)
-        await query.edit_message_text(text)
+        await query.edit_message_text(text, reply_markup=self._build_arrivals_keyboard(stop_code))
+
+    async def handle_bus_fav_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not await self._require_session(update):
+            await query.answer()
+            return
+
+        await query.answer()
+        stop_code = query.data.split(":", 1)[1]
+        name = self._describe_stop(stop_code)
+        self._bus_locations.add(name, stop_code)
+
+        text = await self._format_arrivals(stop_code)
+        await query.edit_message_text(
+            f'⭐ Added "{name}" to preferred stops.\n\n{text}',
+            reply_markup=self._build_arrivals_keyboard(stop_code),
+        )
+
+    async def handle_bus_fav_remove(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not await self._require_session(update):
+            await query.answer()
+            return
+
+        await query.answer()
+        stop_code = query.data.split(":", 1)[1]
+        self._bus_locations.remove_by_code(stop_code)
+
+        text = await self._format_arrivals(stop_code)
+        await query.edit_message_text(
+            f"🗑 Removed from preferred stops.\n\n{text}",
+            reply_markup=self._build_arrivals_keyboard(stop_code),
+        )
+
+    def _describe_stop(self, stop_code: str) -> str:
+        stop = self._bus_stops.find_by_code(stop_code)
+        if stop:
+            return f"{stop['Description']} ({stop_code})"
+        return f"Stop {stop_code}"
+
+    def _build_arrivals_keyboard(self, stop_code: str) -> InlineKeyboardMarkup:
+        if self._bus_locations.has_code(stop_code):
+            fav_button = InlineKeyboardButton(
+                "🗑 Remove from preferred", callback_data=f"bus_fav_remove:{stop_code}"
+            )
+        else:
+            fav_button = InlineKeyboardButton(
+                "⭐ Add as preferred", callback_data=f"bus_fav_add:{stop_code}"
+            )
+        return InlineKeyboardMarkup([[fav_button]])
 
     async def handle_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._require_session(update):
