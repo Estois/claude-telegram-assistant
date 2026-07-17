@@ -16,6 +16,7 @@ messages continue the same conversation; use `/new` to start over.
 | `/addinterests <topic>` | Adds an interest — a word, sentence, or paragraph |
 | `/getinterests` | Lists your interests with their index |
 | `/updateinterests <index> <topic>` | Revises the interest at `<index>` — Claude decides whether `<topic>` adds detail to it or replaces it outright. Requires an unlocked session. |
+| `/endsession` | Ends the current unlocked session immediately, instead of waiting out the timeout |
 | `/new` | Resets the conversation for this chat |
 | `/help` | Lists commands |
 
@@ -24,6 +25,15 @@ configurable via `NEWS_INTERESTS_FILE`) — `/news` reads it before writing
 each digest, so changes take effect immediately with no restart needed.
 The file is managed through the commands above; hand-editing it works too
 as long as entries stay in `N. text` form.
+
+Every `INTERESTS_REORGANIZE_INTERVAL_SECONDS` (default 86400 = daily), a
+background job sends the current interests list to Claude, which merges
+duplicate or overlapping entries and adds a short blurb of extra detail to
+entries where that would help `/news` retrieve more relevant results —
+without inventing interests the list doesn't already imply. Runs
+automatically, no command needed; each allowed user gets a one-line
+Telegram notification when it changes anything. Set the interval to `0` to
+disable it.
 
 Unrecognized commands get a short reply pointing to `/help`. Plain text
 messages are never sent to Claude — see Password / session below.
@@ -43,7 +53,8 @@ work regardless of lock state.
    removing the password from the chat, and starts a session.
 4. The session lasts `SESSION_TIMEOUT_SECONDS` (default 900 = 15 minutes)
    from the moment it unlocks, regardless of activity. After it expires,
-   `/news` locks again and needs the password re-sent.
+   `/news` locks again and needs the password re-sent. Send `/endsession`
+   to lock it early instead of waiting out the timeout.
 
 Any plain-text message is treated as a password attempt, correct or not —
 the bot never runs arbitrary text through Claude. A wrong guess (or no
