@@ -12,22 +12,28 @@ messages continue the same conversation; use `/new` to start over.
 
 | Command | Does |
 | --- | --- |
-| `/news <subject>` | Generates a news digest on `<subject>`, biased toward the interests documented in `interests.md`. Requires an unlocked session (see below). |
+| `/news <subject>` | Generates a news digest on `<subject>`, biased toward your saved interests. Requires an unlocked session (see below). |
+| `/addinterests <topic>` | Adds an interest — a word, sentence, or paragraph |
+| `/getinterests` | Lists your interests with their index |
+| `/updateinterests <index> <topic>` | Revises the interest at `<index>` — Claude decides whether `<topic>` adds detail to it or replaces it outright. Requires an unlocked session. |
 | `/new` | Resets the conversation for this chat |
 | `/help` | Lists commands |
 
-Edit `interests.md` (path configurable via `NEWS_INTERESTS_FILE`) to tell
-Claude what you care about — topics, preferred angle, sources to trust or
-skip. `/news` tells Claude to read that file before writing the digest, so
-changes take effect on the next request with no restart needed.
+Interests are stored as a numbered list in `interests.md` (path
+configurable via `NEWS_INTERESTS_FILE`) — `/news` reads it before writing
+each digest, so changes take effect immediately with no restart needed.
+The file is managed through the commands above; hand-editing it works too
+as long as entries stay in `N. text` form.
 
 Unrecognized commands get a short reply pointing to `/help`. Plain text
 messages are never sent to Claude — see Password / session below.
 
 ## Password / session
 
-`/news` is gated behind a password, since it's the command that invokes
-Claude with permission checks bypassed.
+`/news` and `/updateinterests` are gated behind a password, since they're
+the commands that invoke Claude with permission checks bypassed.
+`/addinterests` and `/getinterests` are plain local file operations and
+work regardless of lock state.
 
 1. Pick a password and hash it: `printf '%s' 'yourpassword' | sha256sum`.
 2. Open `password.hash` in this directory and put the hex digest on its own
