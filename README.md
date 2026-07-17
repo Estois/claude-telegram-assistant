@@ -10,13 +10,18 @@ messages continue the same conversation; use `/new` to start over.
 
 ## Commands
 
+Every command requires an unlocked session (see Password / session below) —
+including `/help` and `/start`. There is no way to see what the bot can do
+without the password first.
+
 | Command | Does |
 | --- | --- |
-| `/news <subject>` | Generates a news digest on `<subject>`, biased toward your saved interests. Requires an unlocked session (see below). |
+| `/news <subject>` | Generates a news digest on `<subject>`, biased toward your saved interests |
 | `/addinterests <topic>` | Adds an interest — a word, sentence, or paragraph |
 | `/getinterests` | Lists your interests with their index |
-| `/updateinterests <index> <topic>` | Revises the interest at `<index>` — Claude decides whether `<topic>` adds detail to it or replaces it outright. Requires an unlocked session. |
-| `/endsession` | Ends the current unlocked session immediately, instead of waiting out the timeout |
+| `/updateinterests <index> <topic>` | Revises the interest at `<index>` — Claude decides whether `<topic>` adds detail to it or replaces it outright |
+| `/compileinterests` | Runs the same merge/enrich pass the background job runs periodically, on demand |
+| `/endsession` | Ends the current session immediately, instead of waiting out the timeout |
 | `/new` | Resets the conversation for this chat |
 | `/help` | Lists commands |
 
@@ -31,19 +36,23 @@ background job sends the current interests list to Claude, which merges
 duplicate or overlapping entries and adds a short blurb of extra detail to
 entries where that would help `/news` retrieve more relevant results —
 without inventing interests the list doesn't already imply. Runs
-automatically, no command needed; each allowed user gets a one-line
-Telegram notification when it changes anything. Set the interval to `0` to
-disable it.
+automatically; each allowed user gets a one-line Telegram notification
+when it changes anything. Set the interval to `0` to disable it. Run
+`/compileinterests` to trigger the same pass on demand — it shares a lock
+with the background job so the two never run concurrently and step on
+each other's edits.
 
 Unrecognized commands get a short reply pointing to `/help`. Plain text
 messages are never sent to Claude — see Password / session below.
 
 ## Password / session
 
-`/news` and `/updateinterests` are gated behind a password, since they're
-the commands that invoke Claude with permission checks bypassed.
-`/addinterests` and `/getinterests` are plain local file operations and
-work regardless of lock state.
+Every command is gated behind a password — even ones like `/help` or
+`/addinterests` that don't touch Claude. A locked command gets only
+"🔒 Locked. Send the password to start a session," never the command's
+actual output, so `/help`'s command list stays hidden until unlocked. The
+one exception is plain text itself, which is the unlock mechanism and
+can't be gated behind its own gate.
 
 1. Pick a password and hash it: `printf '%s' 'yourpassword' | sha256sum`.
 2. Open `password.hash` in this directory and put the hex digest on its own
@@ -114,8 +123,9 @@ static list so wrong-password replies never break.
    python bot.py
    ```
 
-Message your bot on Telegram — try `/news cybersecurity`, or `/help` for the
-full command list.
+Message your bot on Telegram with the password first (see Password /
+session below) to unlock a session, then try `/news cybersecurity` or
+`/help` for the full command list.
 
 ## Configuration
 
