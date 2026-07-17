@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -227,6 +228,56 @@ class ClaudeClient:
         return cmd
 
 
+class InterestsStore:
+    """Manages a flat, numbered list of interest entries in interests.md,
+    read by /news to bias digest topics and framing."""
+
+    HEADER = (
+        "# News Interests\n\n"
+        "Read by /news to bias digest topic selection and framing. Managed "
+        "via /addinterests, /getinterests, /updateinterests.\n\n"
+    )
+    ENTRY_PATTERN = re.compile(r"^\d+\.\s+(.*)$")
+
+    def __init__(self, path: Path):
+        self._path = path
+
+    def list(self) -> list:
+        if not self._path.exists():
+            return []
+        entries = []
+        for line in self._path.read_text().splitlines():
+            match = self.ENTRY_PATTERN.match(line.strip())
+            if match:
+                entries.append(match.group(1))
+        return entries
+
+    def add(self, text: str) -> int:
+        """Appends a new entry and returns its 1-based index."""
+        entries = self.list()
+        entries.append(self._normalize(text))
+        self._write(entries)
+        return len(entries)
+
+    def update(self, index: int, text: str) -> bool:
+        """Replaces the entry at the given 1-based index. Returns False if
+        the index is out of range."""
+        entries = self.list()
+        if not 1 <= index <= len(entries):
+            return False
+        entries[index - 1] = self._normalize(text)
+        self._write(entries)
+        return True
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        return " ".join(text.split())
+
+    def _write(self, entries: list) -> None:
+        body = "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, start=1))
+        self._path.write_text(self.HEADER + body + ("\n" if body else ""))
+
+
 class TriviaBook:
     """Serves animal trivia facts in a shuffled, non-repeating rotation.
 
@@ -316,6 +367,7 @@ class NewsBot:
         self._sessions = ClaudeSessionStore(config.sessions_file)
         self._claude = ClaudeClient(config, self._sessions)
         self._trivia = TriviaBook(config.trivia_cache_file, config.trivia_state_file, FALLBACK_TRIVIA)
+        self._interests = InterestsStore(config.news_interests_file)
         self._help_text = self._build_help_text()
 
     def run(self) -> None:
@@ -327,8 +379,12 @@ class NewsBot:
         return (
             "Commands:\n"
             "/news <subject> — news digest on a subject, biased toward your interests. "
-            f"Requires an unlocked session — send the password as a plain message first "
+            "Requires an unlocked session — send the password as a plain message first "
             f"(lasts {minutes} minutes).\n"
+            "/addinterests <topic> — add an interest (word, sentence, or paragraph)\n"
+            "/getinterests — list your interests with their index\n"
+            "/updateinterests <index> <topic> — revise or rewrite an interest "
+            "(Claude decides which); requires an unlocked session\n"
             "/new — start a fresh conversation\n"
             "/help — show this message"
         )
@@ -339,6 +395,9 @@ class NewsBot:
         app.add_handler(CommandHandler("help", self.handle_help))
         app.add_handler(CommandHandler("new", self.handle_new))
         app.add_handler(CommandHandler("news", self.handle_news))
+        app.add_handler(CommandHandler("addinterests", self.handle_add_interests))
+        app.add_handler(CommandHandler("getinterests", self.handle_get_interests))
+        app.add_handler(CommandHandler("updateinterests", self.handle_update_interests))
         app.add_handler(MessageHandler(filters.COMMAND, self.handle_unknown_command))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_plain_text))
         return app
@@ -388,6 +447,19 @@ class NewsBot:
             "of a tag."
         )
 
+    @staticmethod
+    def _build_update_interest_prompt(old_entry: str, new_input: str) -> str:
+        return (
+            "I'm editing one entry in a personal interests list used to bias news "
+            f'digests. Existing entry: "{old_entry}"\n'
+            f'New input: "{new_input}"\n\n'
+            "Decide whether the new input is meant to add detail to the existing "
+            "entry or fully replace it, and produce the resulting entry text "
+            "accordingly. Reply with ONLY the final entry text as a single plain-text "
+            "paragraph — no quotes, no labels, no explanation, no formatting, nothing "
+            "else."
+        )
+
     # -- Command handlers -------------------------------------------------
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -420,7 +492,73 @@ class NewsBot:
             return
 
         subject = " ".join(context.args)
-        await self._run_claude_and_reply(update, context, self._build_news_prompt(subject))
+        reply = await self._run_claude(update, context, self._build_news_prompt(subject))
+        if reply is not None:
+            await self._send_formatted(update, reply)
+
+    async def handle_add_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_authorized(update):
+            return
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: /addinterests <topic>\nExample: /addinterests cybersecurity, "
+                "especially supply chain attacks"
+            )
+            return
+        topic = " ".join(context.args)
+        index = self._interests.add(topic)
+        await update.message.reply_text(f"Added as interest #{index}.")
+
+    async def handle_get_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_authorized(update):
+            return
+        entries = self._interests.list()
+        if not entries:
+            await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
+            return
+        listing = "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, start=1))
+        await update.message.reply_text(listing)
+
+    async def handle_update_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_authorized(update):
+            return
+
+        chat_id = update.effective_chat.id
+        if not self._password_gate.is_unlocked(chat_id):
+            await update.message.reply_text("🔒 Locked. Send the password to start a session.")
+            return
+
+        if len(context.args) < 2:
+            await update.message.reply_text(
+                "Usage: /updateinterests <index> <topic>\nExample: /updateinterests 2 "
+                "also mention zero-day exploits"
+            )
+            return
+
+        index_arg, *topic_parts = context.args
+        if not index_arg.isdigit():
+            await update.message.reply_text("Index must be a number. See /getinterests for valid indices.")
+            return
+
+        index = int(index_arg)
+        entries = self._interests.list()
+        if not entries:
+            await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
+            return
+        if not 1 <= index <= len(entries):
+            await update.message.reply_text(
+                f"No interest #{index}. Valid range: 1-{len(entries)}. See /getinterests."
+            )
+            return
+
+        topic = " ".join(topic_parts)
+        prompt = self._build_update_interest_prompt(entries[index - 1], topic)
+        new_text = await self._run_claude(update, context, prompt)
+        if new_text is None:
+            return
+
+        self._interests.update(index, new_text)
+        await update.message.reply_text(f"Updated interest #{index}.")
 
     async def handle_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._is_authorized(update):
@@ -453,27 +591,28 @@ class NewsBot:
 
     # -- Claude dispatch ----------------------------------------------------
 
-    async def _run_claude_and_reply(
+    async def _run_claude(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str
-    ) -> None:
+    ) -> Optional[str]:
+        """Runs prompt through Claude for this chat and returns the raw
+        reply. Returns None if a busy/error message was already sent to the
+        user and the caller should stop."""
         chat_id = update.effective_chat.id
         lock = self._claude.lock_for(chat_id)
         if lock.locked():
             await update.message.reply_text("Still working on your last request — hang on.")
-            return
+            return None
 
         async with lock:
             keep_typing = asyncio.create_task(self._keep_typing(context, chat_id))
             try:
-                reply = await self._claude.run(chat_id, prompt)
+                return await self._claude.run(chat_id, prompt)
             except Exception as exc:
                 logger.exception("claude invocation failed")
                 await update.message.reply_text(f"Something went wrong: {exc}")
-                return
+                return None
             finally:
                 keep_typing.cancel()
-
-        await self._send_formatted(update, reply)
 
     async def _send_formatted(self, update: Update, text: str) -> None:
         """Sends Claude's reply, chunked for Telegram's message limit. Tries
