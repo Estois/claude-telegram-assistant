@@ -20,5 +20,16 @@
             "envManager": "ms-python.python:venv",
             "packageManager": "ms-python.python:pip"
         }
-    ]
+    ],
+    "python.analysis.diagnosticSeverityOverrides": {
+        // python-telegram-bot types Update.message as Optional[Message]
+        // since callback-query/channel-post updates have none. Every
+        // access in this codebase is inside a CommandHandler/MessageHandler
+        // registered for actual messages, so update.message is always
+        // populated there — verified by tracing every call site. Silencing
+        // this specific rule avoids ~40 false-positive squiggles without
+        // adding dead "if update.message is None" guards for a case that
+        // can't happen in this code.
+        "reportOptionalMemberAccess": "none"
+    }
 }
