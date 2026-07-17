@@ -1,0 +1,13 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+*.log
+.env
+password.hash
+bus_locations.json
+sessions.json
+trivia_cache.json
+trivia_state.json
+bus_stops_cache.json

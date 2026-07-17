@@ -1,0 +1,19 @@
+services:
+  bot:
+    build: .
+    container_name: telegram-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Singapore
+    volumes:
+      # Whole repo, so bot.py picks up gitignored/hand-edited files
+      # (password.hash, bus_locations.json, interests.md, sessions.json,
+      # trivia_cache.json, ...) at their default paths, and code edits show
+      # up on the next `docker compose restart` with no rebuild needed.
+      - .:/app
+      # Claude Code auth (.credentials.json), global settings.json, and
+      # personal skills under ~/.claude/skills — shared with the host so the
+      # container doesn't need its own `claude auth login`.
+      - ~/.claude:/root/.claude

@@ -180,6 +180,50 @@ Message your bot on Telegram with the password first (see Password /
 session below) to unlock a session, then try `/news cybersecurity` or
 `/help` for the full command list.
 
+## Running with Docker
+
+Alternative to the venv setup above — runs the bot in a container instead.
+Still needs step 1 (BotFather token) and step 4 (`.env`) from Setup; skips
+steps 2–3 (Claude CLI install, venv) since the image handles those.
+
+```bash
+cp .env.example .env   # fill it in, same as the non-Docker setup
+docker compose up -d --build
+docker compose logs -f  # equivalent of tailing bot.log
+```
+
+What `docker-compose.yml` does:
+
+- Builds the image from `Dockerfile`, which installs the Claude Code CLI
+  and this repo's Python dependencies — no local venv needed.
+- Bind-mounts the whole repo into the container at `/app`. This means the
+  gitignored, hand-edited files (`password.hash`, `bus_locations.json`,
+  `interests.md`, `sessions.json`, `trivia_cache.json`, ...) are read from
+  and written back to your actual working directory, exactly like running
+  `python bot.py` directly — no separate data volume to manage, and no
+  rebuild needed after editing `bot.py` (just `docker compose restart`).
+- Bind-mounts `~/.claude` into the container. **This is the important
+  one**: Claude Code auth is OAuth-based (`~/.claude/.credentials.json`),
+  tied to this machine's login — the container reuses it instead of
+  needing its own `claude auth login`. It also carries over your global
+  personal skills and `~/.claude/settings.json`, so Claude behaves the
+  same inside the container as it does on the host.
+
+Caveats:
+
+- If `.env` sets `CLAUDE_WORKDIR` to an absolute host path outside this
+  repo, it won't resolve inside the container unless you also add a bind
+  mount for it in `docker-compose.yml` — leave it unset (the default) to
+  avoid this entirely.
+- `TELEGRAM_ALLOWED_USER_IDS` matters even more here: the container's
+  Claude runs with the same `bypassPermissions` access as the host CLI, so
+  the allowlist is the only thing standing between a stranger and shell
+  access on this machine (see Security below).
+- Rebuild (`docker compose up -d --build`) after changing
+  `requirements.txt` or the `Dockerfile` itself; a plain `docker compose
+  restart` is enough for `bot.py`/data-file changes since those are
+  bind-mounted, not baked into the image.
+
 ## Configuration
 
 Optional environment variables (see `.env.example`):
