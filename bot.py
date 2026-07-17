@@ -32,6 +32,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Sentinel chat id for the background interests-reorganization job, which
+# isn't tied to any real Telegram chat. Telegram user ids are always
+# positive and group/channel ids always negative, so 0 never collides.
+MAINTENANCE_CHAT_ID = 0
+
 FALLBACK_TRIVIA = [
     {"animal": "Octopus", "fact": "Octopuses have three hearts and blue blood."},
     {"animal": "Sloth", "fact": "Sloths can take up to a month to digest a single meal."},
@@ -54,6 +59,7 @@ class Config:
     claude_permission_mode: str
     claude_timeout_seconds: int
     news_interests_file: Path
+    interests_reorganize_interval_seconds: int
     password_hash_file: Path
     session_timeout_seconds: int
     sessions_file: Path
@@ -87,6 +93,9 @@ class Config:
             news_interests_file=Path(
                 os.environ.get("NEWS_INTERESTS_FILE", str(base_dir / "interests.md"))
             ).resolve(),
+            interests_reorganize_interval_seconds=int(
+                os.environ.get("INTERESTS_REORGANIZE_INTERVAL_SECONDS", "86400")
+            ),
             password_hash_file=Path(
                 os.environ.get("PASSWORD_HASH_FILE", str(base_dir / "password.hash"))
             ).resolve(),
@@ -126,6 +135,13 @@ class PasswordGate:
             return False
         self._unlocked_until[chat_id] = time.monotonic() + self._session_timeout_seconds
         return True
+
+    def lock(self, chat_id: int) -> bool:
+        """Ends the session for a chat immediately. Returns whether one was
+        active."""
+        was_unlocked = self.is_unlocked(chat_id)
+        self._unlocked_until.pop(chat_id, None)
+        return was_unlocked
 
     def _load_hash(self) -> Optional[str]:
         if not self._hash_file.exists():
@@ -245,12 +261,7 @@ class InterestsStore:
     def list(self) -> list:
         if not self._path.exists():
             return []
-        entries = []
-        for line in self._path.read_text().splitlines():
-            match = self.ENTRY_PATTERN.match(line.strip())
-            if match:
-                entries.append(match.group(1))
-        return entries
+        return self.parse_entries(self._path.read_text())
 
     def add(self, text: str) -> int:
         """Appends a new entry and returns its 1-based index."""
@@ -268,6 +279,21 @@ class InterestsStore:
         entries[index - 1] = self._normalize(text)
         self._write(entries)
         return True
+
+    def replace_all(self, entries: list) -> None:
+        """Overwrites the whole list, e.g. after a reorganization pass."""
+        self._write([self._normalize(entry) for entry in entries])
+
+    @classmethod
+    def parse_entries(cls, text: str) -> list:
+        """Extracts entries from arbitrary 'N. text' lines, e.g. Claude's
+        raw reply to a reorganize prompt."""
+        entries = []
+        for line in text.splitlines():
+            match = cls.ENTRY_PATTERN.match(line.strip())
+            if match:
+                entries.append(match.group(1))
+        return entries
 
     @staticmethod
     def _normalize(text: str) -> str:
@@ -369,6 +395,7 @@ class NewsBot:
         self._trivia = TriviaBook(config.trivia_cache_file, config.trivia_state_file, FALLBACK_TRIVIA)
         self._interests = InterestsStore(config.news_interests_file)
         self._help_text = self._build_help_text()
+        self._reorganize_task: Optional[asyncio.Task] = None
 
     def run(self) -> None:
         self._warn_about_missing_config()
@@ -385,15 +412,23 @@ class NewsBot:
             "/getinterests — list your interests with their index\n"
             "/updateinterests <index> <topic> — revise or rewrite an interest "
             "(Claude decides which); requires an unlocked session\n"
+            "/endsession — end the current unlocked session now\n"
             "/new — start a fresh conversation\n"
             "/help — show this message"
         )
 
     def _build_application(self) -> Application:
-        app = Application.builder().token(self._config.telegram_token).build()
+        app = (
+            Application.builder()
+            .token(self._config.telegram_token)
+            .post_init(self._on_startup)
+            .post_shutdown(self._on_shutdown)
+            .build()
+        )
         app.add_handler(CommandHandler("start", self.handle_start))
         app.add_handler(CommandHandler("help", self.handle_help))
         app.add_handler(CommandHandler("new", self.handle_new))
+        app.add_handler(CommandHandler("endsession", self.handle_end_session))
         app.add_handler(CommandHandler("news", self.handle_news))
         app.add_handler(CommandHandler("addinterests", self.handle_add_interests))
         app.add_handler(CommandHandler("getinterests", self.handle_get_interests))
@@ -460,6 +495,23 @@ class NewsBot:
             "else."
         )
 
+    @staticmethod
+    def _build_reorganize_prompt(entries: list) -> str:
+        numbered = "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, start=1))
+        return (
+            "Here is my current news-interests list, used to bias what /news digests "
+            f"cover:\n\n{numbered}\n\n"
+            "Reorganize this list: merge entries that are duplicates or clearly the same "
+            "underlying topic, and where it would help a news-search assistant retrieve "
+            "more relevant results, add a short blurb of extra detail to an entry — "
+            "specific sub-topics, entities, or angles reasonably implied by what's "
+            "already there. Don't invent interests the list doesn't imply, and don't "
+            "drop any distinct topic. "
+            "Reply with ONLY the resulting list, renumbered from 1, one entry per line, "
+            "in the exact form '<number>. <entry text>' — plain text, no extra "
+            "commentary, no headers, no markdown."
+        )
+
     # -- Command handlers -------------------------------------------------
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -477,6 +529,12 @@ class NewsBot:
             return
         self._sessions.clear(update.effective_chat.id)
         await update.message.reply_text("Started a new conversation.")
+
+    async def handle_end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_authorized(update):
+            return
+        ended = self._password_gate.lock(update.effective_chat.id)
+        await update.message.reply_text("Session ended." if ended else "No active session.")
 
     async def handle_news(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._is_authorized(update):
@@ -634,6 +692,55 @@ class NewsBot:
                 await asyncio.sleep(4)
         except asyncio.CancelledError:
             pass
+
+    # -- Background interests maintenance ------------------------------
+
+    async def _on_startup(self, app: Application) -> None:
+        interval = self._config.interests_reorganize_interval_seconds
+        if interval > 0:
+            self._reorganize_task = asyncio.create_task(self._reorganize_loop(app, interval))
+
+    async def _on_shutdown(self, app: Application) -> None:
+        if self._reorganize_task:
+            self._reorganize_task.cancel()
+
+    async def _reorganize_loop(self, app: Application, interval_seconds: int) -> None:
+        try:
+            while True:
+                await asyncio.sleep(interval_seconds)
+                try:
+                    await self._reorganize_interests(app)
+                except Exception:
+                    logger.exception("Interests reorganization failed")
+        except asyncio.CancelledError:
+            pass
+
+    async def _reorganize_interests(self, app: Application) -> None:
+        entries = self._interests.list()
+        if len(entries) < 2:
+            return  # nothing meaningful to merge or expand
+
+        prompt = self._build_reorganize_prompt(entries)
+        raw_reply = await self._claude.run(MAINTENANCE_CHAT_ID, prompt)
+        new_entries = InterestsStore.parse_entries(raw_reply)
+        if not new_entries:
+            logger.warning("Interests reorganize returned nothing parseable, leaving interests.md untouched")
+            return
+
+        self._interests.replace_all(new_entries)
+        logger.info("Reorganized interests: %d -> %d entries", len(entries), len(new_entries))
+        await self._notify_reorganized(app, len(entries), len(new_entries))
+
+    async def _notify_reorganized(self, app: Application, before_count: int, after_count: int) -> None:
+        allowed = self._config.allowed_user_ids
+        if not allowed:
+            return
+        summary = f"🗂 Reorganized interests: {before_count} → {after_count} entries. See /getinterests."
+        for user_id in allowed:
+            try:
+                await app.bot.send_message(chat_id=user_id, text=summary)
+            except Exception:
+                logger.exception("Failed to notify chat %s about reorganized interests", user_id)
 
 
 def main() -> None:
