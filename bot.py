@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 # Third-party
 import httpx
@@ -42,11 +42,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Sentinel chat id for the background interests-reorganization job, which
-# isn't tied to any real Telegram chat. Telegram user ids are always
-# positive and group/channel ids always negative, so 0 never collides.
-MAINTENANCE_CHAT_ID = 0
-
 FALLBACK_TRIVIA = [
     {"animal": "Octopus", "fact": "Octopuses have three hearts and blue blood."},
     {"animal": "Sloth", "fact": "Sloths can take up to a month to digest a single meal."},
@@ -68,15 +63,14 @@ class Config:
     claude_model: Optional[str]
     claude_permission_mode: str
     claude_timeout_seconds: int
-    news_interests_file: Path
+    accounts_dir: Path
     interests_reorganize_interval_seconds: int
-    password_hash_file: Path
+    accounts_file: Path
     session_timeout_seconds: int
     sessions_file: Path
     trivia_cache_file: Path
     trivia_state_file: Path
     lta_api_key: Optional[str]
-    bus_locations_file: Path
     bus_stops_cache_file: Path
     bus_nearby_count: int
 
@@ -104,23 +98,20 @@ class Config:
             claude_model=os.environ.get("CLAUDE_MODEL"),
             claude_permission_mode=os.environ.get("CLAUDE_PERMISSION_MODE", "bypassPermissions"),
             claude_timeout_seconds=int(os.environ.get("CLAUDE_TIMEOUT_SECONDS", "600")),
-            news_interests_file=Path(
-                os.environ.get("NEWS_INTERESTS_FILE", str(base_dir / "interests.md"))
+            accounts_dir=Path(
+                os.environ.get("ACCOUNTS_DIR", str(base_dir / "accounts"))
             ).resolve(),
             interests_reorganize_interval_seconds=int(
                 os.environ.get("INTERESTS_REORGANIZE_INTERVAL_SECONDS", "86400")
             ),
-            password_hash_file=Path(
-                os.environ.get("PASSWORD_HASH_FILE", str(base_dir / "password.hash"))
+            accounts_file=Path(
+                os.environ.get("ACCOUNTS_FILE", str(base_dir / "accounts.hash"))
             ).resolve(),
             session_timeout_seconds=int(os.environ.get("SESSION_TIMEOUT_SECONDS", "900")),
             sessions_file=base_dir / "sessions.json",
             trivia_cache_file=base_dir / "trivia_cache.json",
             trivia_state_file=base_dir / "trivia_state.json",
             lta_api_key=os.environ.get("LTA_API_KEY"),
-            bus_locations_file=Path(
-                os.environ.get("BUS_LOCATIONS_FILE", str(base_dir / "bus_locations.json"))
-            ).resolve(),
             bus_stops_cache_file=Path(
                 os.environ.get("BUS_STOPS_CACHE_FILE", str(base_dir / "bus_stops_cache.json"))
             ).resolve(),
@@ -128,72 +119,111 @@ class Config:
         )
 
 
-class PasswordGate:
-    """Tracks per-chat unlock state and verifies password attempts.
+class AccountStore:
+    """Maps password hashes to account ids, and tracks which account each
+    chat is currently unlocked as.
 
-    The password is never stored in plaintext — only its SHA256 hex digest,
-    read fresh from disk on every attempt so it can be rotated without a
-    restart.
+    One account can have multiple password hashes — e.g. one per device —
+    and any of them unlocks that account, sharing its interests and bus
+    locations. The password itself is never stored, only its SHA256 hex
+    digest, read fresh from disk on every attempt so accounts can be
+    added/rotated without a restart.
     """
 
-    def __init__(self, hash_file: Path, session_timeout_seconds: int):
-        self._hash_file = hash_file
+    ACCOUNT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+    def __init__(self, accounts_file: Path, session_timeout_seconds: int):
+        self._accounts_file = accounts_file
         self._session_timeout_seconds = session_timeout_seconds
-        self._unlocked_until: dict[int, float] = {}
+        self._sessions: dict[int, tuple] = {}  # chat_id -> (account_id, expiry)
 
     @property
     def is_configured(self) -> bool:
-        return bool(self._load_hashes())
+        return any(self._load_accounts().values())
+
+    def list_ids(self) -> list:
+        return list(self._load_accounts().keys())
 
     def is_unlocked(self, chat_id: int) -> bool:
-        expiry = self._unlocked_until.get(chat_id)
-        return expiry is not None and time.monotonic() < expiry
+        session = self._sessions.get(chat_id)
+        return session is not None and time.monotonic() < session[1]
 
-    def try_unlock(self, chat_id: int, attempt: str) -> bool:
-        hashes = self._load_hashes()
-        if not hashes:
-            return False
-        if hashlib.sha256(attempt.encode()).hexdigest() not in hashes:
-            return False
-        self._unlocked_until[chat_id] = time.monotonic() + self._session_timeout_seconds
-        return True
+    def account_for(self, chat_id: int) -> Optional[str]:
+        """The account this chat is currently unlocked as, or None if
+        locked/expired."""
+        if not self.is_unlocked(chat_id):
+            return None
+        return self._sessions[chat_id][0]
+
+    def try_unlock(self, chat_id: int, attempt: str) -> Optional[str]:
+        """Returns the account id the attempt unlocked, or None if it
+        matched no account's hash."""
+        digest = hashlib.sha256(attempt.encode()).hexdigest()
+        for account_id, hashes in self._load_accounts().items():
+            if digest in hashes:
+                self._sessions[chat_id] = (account_id, time.monotonic() + self._session_timeout_seconds)
+                return account_id
+        return None
 
     def lock(self, chat_id: int) -> bool:
         """Ends the session for a chat immediately. Returns whether one was
         active."""
         was_unlocked = self.is_unlocked(chat_id)
-        self._unlocked_until.pop(chat_id, None)
+        self._sessions.pop(chat_id, None)
         return was_unlocked
 
-    def _load_hashes(self) -> set:
-        """Every non-comment, non-empty line is a valid password hash — any
-        of them unlocks a session, so multiple people/devices can each have
-        their own password."""
-        if not self._hash_file.exists():
-            return set()
-        hashes = set()
-        for line in self._hash_file.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#"):
-                hashes.add(line.lower())
-        return hashes
+    def _load_accounts(self) -> dict:
+        """Parses '# account: <id>' header lines, each followed by that
+        account's password hash(es), one per line, until the next header.
+        Hashes appearing before any header can't be attributed to an
+        account and are skipped with a warning."""
+        if not self._accounts_file.exists():
+            return {}
+
+        accounts: dict = {}
+        current = None
+        for raw_line in self._accounts_file.read_text().splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("# account:"):
+                candidate = line.split(":", 1)[1].strip()
+                if not self.ACCOUNT_ID_PATTERN.match(candidate):
+                    logger.warning("Ignoring invalid account id in %s: %r", self._accounts_file, candidate)
+                    current = None
+                    continue
+                current = candidate
+                accounts.setdefault(current, set())
+                continue
+            if line.startswith("#"):
+                continue
+            if current is None:
+                logger.warning(
+                    "Password hash in %s before any '# account:' header, ignoring", self._accounts_file
+                )
+                continue
+            accounts[current].add(line.lower())
+        return accounts
 
 
 class ClaudeSessionStore:
-    """Persists chat_id -> Claude session id mappings to disk."""
+    """Persists chat_id -> Claude session id mappings to disk. chat_id is
+    usually a real Telegram chat id, but the background/manual interests
+    maintenance jobs pass a synthetic string key instead (one per account,
+    so each account's reorganize pass gets its own Claude conversation)."""
 
     def __init__(self, path: Path):
         self._path = path
 
-    def get(self, chat_id: int) -> Optional[str]:
+    def get(self, chat_id: Union[int, str]) -> Optional[str]:
         return self._read().get(str(chat_id))
 
-    def set(self, chat_id: int, session_id: str) -> None:
+    def set(self, chat_id: Union[int, str], session_id: str) -> None:
         sessions = self._read()
         sessions[str(chat_id)] = session_id
         self._write(sessions)
 
-    def clear(self, chat_id: int) -> bool:
+    def clear(self, chat_id: Union[int, str]) -> bool:
         sessions = self._read()
         if sessions.pop(str(chat_id), None) is None:
             return False
@@ -216,12 +246,12 @@ class ClaudeClient:
     def __init__(self, config: Config, sessions: ClaudeSessionStore):
         self._config = config
         self._sessions = sessions
-        self._locks: dict[int, asyncio.Lock] = {}
+        self._locks: dict = {}
 
-    def lock_for(self, chat_id: int) -> asyncio.Lock:
+    def lock_for(self, chat_id: Union[int, str]) -> asyncio.Lock:
         return self._locks.setdefault(chat_id, asyncio.Lock())
 
-    async def run(self, chat_id: int, prompt: str) -> str:
+    async def run(self, chat_id: Union[int, str], prompt: str) -> str:
         session_id = self._sessions.get(chat_id)
         is_new_session = session_id is None
         if is_new_session:
@@ -730,18 +760,37 @@ class BusLocationsStore:
 class NewsBot:
     """Wires the Telegram handlers together with the services above."""
 
+    INTERESTS_FILENAME = "interests.md"
+    BUS_LOCATIONS_FILENAME = "bus_locations.json"
+
     def __init__(self, config: Config):
         self._config = config
-        self._password_gate = PasswordGate(config.password_hash_file, config.session_timeout_seconds)
+        self._accounts = AccountStore(config.accounts_file, config.session_timeout_seconds)
         self._sessions = ClaudeSessionStore(config.sessions_file)
         self._claude = ClaudeClient(config, self._sessions)
         self._trivia = TriviaBook(config.trivia_cache_file, config.trivia_state_file, FALLBACK_TRIVIA)
-        self._interests = InterestsStore(config.news_interests_file)
         self._lta = LtaBusClient(config.lta_api_key)
         self._bus_stops = BusStopsCache(config.bus_stops_cache_file)
-        self._bus_locations = BusLocationsStore(config.bus_locations_file)
         self._help_text = self._build_help_text()
         self._reorganize_task: Optional[asyncio.Task] = None
+
+    def _account_dir(self, account_id: str) -> Path:
+        path = self._config.accounts_dir / account_id
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _interests_for(self, account_id: str) -> InterestsStore:
+        return InterestsStore(self._account_dir(account_id) / self.INTERESTS_FILENAME)
+
+    def _bus_locations_for(self, account_id: str) -> BusLocationsStore:
+        return BusLocationsStore(self._account_dir(account_id) / self.BUS_LOCATIONS_FILENAME)
+
+    @staticmethod
+    def _maintenance_key(account_id: str) -> str:
+        """Synthetic ClaudeClient/session key for an account's background
+        interests-reorganization conversation — never a real Telegram chat
+        id, so it can't collide with one."""
+        return f"maintenance:{account_id}"
 
     def run(self) -> None:
         self._warn_about_missing_config()
@@ -751,7 +800,8 @@ class NewsBot:
         minutes = self._config.session_timeout_seconds // 60
         return (
             "Every command needs an unlocked session — send the password as a plain "
-            f"message first (lasts {minutes} minutes).\n\n"
+            f"message first (lasts {minutes} minutes). Interests and preferred bus "
+            "stops belong to whichever account your password unlocked.\n\n"
             "Commands:\n"
             "/news <subject> — news digest on a subject, biased toward your interests\n"
             "/addinterests <topic> — add an interest (word, sentence, or paragraph)\n"
@@ -802,15 +852,10 @@ class NewsBot:
                 "Claude Code with permission checks bypassed (%s). Set it before exposing this bot.",
                 self._config.claude_permission_mode,
             )
-        if not self._config.news_interests_file.exists():
+        if not self._accounts.is_configured:
             logger.warning(
-                "Interests file %s doesn't exist yet — /news will run without personalization.",
-                self._config.news_interests_file,
-            )
-        if not self._password_gate.is_configured:
-            logger.warning(
-                "No password hash in %s — /news will stay locked until you add one.",
-                self._config.password_hash_file,
+                "No accounts configured in %s — every command will stay locked until you add one.",
+                self._config.accounts_file,
             )
         if not self._lta.is_configured:
             logger.warning(
@@ -826,24 +871,27 @@ class NewsBot:
             logger.warning("Ignoring message from unauthorized user %s", update.effective_user.id)
         return authorized
 
-    async def _require_session(self, update: Update) -> bool:
+    async def _require_session(self, update: Update) -> Optional[str]:
         """Every command runs behind the password gate. The one exception is
         handle_plain_text, which is the unlock mechanism itself — gating it
         too would make it impossible to ever unlock. Checks authorization
         first; unauthorized senders get silence, not a lock notice, so the
-        bot doesn't confirm its own existence to strangers."""
+        bot doesn't confirm its own existence to strangers. Returns the
+        unlocked account id, or None if the caller should stop (already
+        replied with the lock notice in that case)."""
         if not self._is_authorized(update):
-            return False
-        if not self._password_gate.is_unlocked(update.effective_chat.id):
+            return None
+        account_id = self._accounts.account_for(update.effective_chat.id)
+        if account_id is None:
             # effective_message (not .message) so this also works for
             # callback-query updates, where .message is None but
             # .callback_query.message holds the original message.
             await update.effective_message.reply_text("🔒 Locked. Send the password to start a session.")
-            return False
-        return True
+            return None
+        return account_id
 
-    def _build_news_prompt(self, subject: str) -> str:
-        interests_file = self._config.news_interests_file
+    def _build_news_prompt(self, subject: str, account_id: str) -> str:
+        interests_file = self._account_dir(account_id) / self.INTERESTS_FILENAME
         return (
             f"Silently read {interests_file} for context on my personal interests — "
             "do not mention this file, its contents, or whether it has been filled in "
@@ -893,29 +941,30 @@ class NewsBot:
     # -- Command handlers -------------------------------------------------
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        if await self._require_session(update) is None:
             return
         await update.message.reply_text("Hi!")
 
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        if await self._require_session(update) is None:
             return
         await update.message.reply_text(self._help_text)
 
     async def handle_new(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        if await self._require_session(update) is None:
             return
         self._sessions.clear(update.effective_chat.id)
         await update.message.reply_text("Started a new conversation.")
 
     async def handle_end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        if await self._require_session(update) is None:
             return
-        ended = self._password_gate.lock(update.effective_chat.id)
+        ended = self._accounts.lock(update.effective_chat.id)
         await update.message.reply_text("Session ended." if ended else "No active session.")
 
     async def handle_news(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        account_id = await self._require_session(update)
+        if account_id is None:
             return
 
         if not context.args:
@@ -923,12 +972,13 @@ class NewsBot:
             return
 
         subject = " ".join(context.args)
-        reply = await self._run_claude(update, context, self._build_news_prompt(subject))
+        reply = await self._run_claude(update, context, self._build_news_prompt(subject, account_id))
         if reply is not None:
             await self._send_formatted(update, reply)
 
     async def handle_add_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        account_id = await self._require_session(update)
+        if account_id is None:
             return
         if not context.args:
             await update.message.reply_text(
@@ -937,20 +987,22 @@ class NewsBot:
             )
             return
         topic = " ".join(context.args)
-        index = self._interests.add(topic)
+        index = self._interests_for(account_id).add(topic)
         await update.message.reply_text(f"Added as interest #{index}.")
 
     async def handle_get_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        account_id = await self._require_session(update)
+        if account_id is None:
             return
-        entries = self._interests.list()
+        entries = self._interests_for(account_id).list()
         if not entries:
             await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
             return
         await update.message.reply_text(self._format_interests_listing(entries))
 
     async def handle_update_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        account_id = await self._require_session(update)
+        if account_id is None:
             return
 
         if len(context.args) < 2:
@@ -966,7 +1018,8 @@ class NewsBot:
             return
 
         index = int(index_arg)
-        entries = self._interests.list()
+        interests = self._interests_for(account_id)
+        entries = interests.list()
         if not entries:
             await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
             return
@@ -982,23 +1035,27 @@ class NewsBot:
         if new_text is None:
             return
 
-        self._interests.update(index, new_text)
+        interests.update(index, new_text)
         await update.message.reply_text(f"Updated interest #{index}.")
 
     async def handle_compile_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Manual trigger for the same reorganization the background job
         runs periodically: merge duplicate/overlapping interests and add
         retrieval-helpful detail."""
-        if not await self._require_session(update):
+        account_id = await self._require_session(update)
+        if account_id is None:
             return
 
-        entries = self._interests.list()
+        interests = self._interests_for(account_id)
+        entries = interests.list()
         if len(entries) < 2:
             await update.message.reply_text("Need at least 2 interests to reorganize. See /getinterests.")
             return
 
         prompt = self._build_reorganize_prompt(entries)
-        raw_reply = await self._run_claude(update, context, prompt, chat_id=MAINTENANCE_CHAT_ID)
+        raw_reply = await self._run_claude(
+            update, context, prompt, chat_id=self._maintenance_key(account_id)
+        )
         if raw_reply is None:
             return
 
@@ -1007,7 +1064,7 @@ class NewsBot:
             await update.message.reply_text("Reorganize returned nothing usable — no changes made.")
             return
 
-        self._interests.replace_all(new_entries)
+        interests.replace_all(new_entries)
         summary = f"🗂 Reorganized interests: {len(entries)} → {len(new_entries)} entries."
         await update.message.reply_text(
             f"{summary}\n\n{self._format_interests_listing(new_entries)}"
@@ -1018,10 +1075,11 @@ class NewsBot:
         return "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, start=1))
 
     async def handle_bus(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        account_id = await self._require_session(update)
+        if account_id is None:
             return
 
-        locations = self._bus_locations.list()
+        locations = self._bus_locations_for(account_id).list()
         buttons = [
             [InlineKeyboardButton(name, callback_data=f"bus_stop:{code}")]
             for name, code in locations.items()
@@ -1035,7 +1093,7 @@ class NewsBot:
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         query = update.callback_query
-        if not await self._require_session(update):
+        if await self._require_session(update) is None:
             await query.answer()
             return
 
@@ -1047,46 +1105,49 @@ class NewsBot:
 
     async def handle_bus_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
-        if not await self._require_session(update):
+        account_id = await self._require_session(update)
+        if account_id is None:
             await query.answer()
             return
 
         await query.answer()
         stop_code = query.data.split(":", 1)[1]
         text = await self._format_arrivals(stop_code)
-        await query.edit_message_text(text, reply_markup=self._build_arrivals_keyboard(stop_code))
+        await query.edit_message_text(text, reply_markup=self._build_arrivals_keyboard(stop_code, account_id))
 
     async def handle_bus_fav_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
-        if not await self._require_session(update):
+        account_id = await self._require_session(update)
+        if account_id is None:
             await query.answer()
             return
 
         await query.answer()
         stop_code = query.data.split(":", 1)[1]
         name = self._describe_stop(stop_code)
-        self._bus_locations.add(name, stop_code)
+        self._bus_locations_for(account_id).add(name, stop_code)
 
         text = await self._format_arrivals(stop_code)
         await query.edit_message_text(
             f'⭐ Added "{name}" to preferred stops.\n\n{text}',
-            reply_markup=self._build_arrivals_keyboard(stop_code),
+            reply_markup=self._build_arrivals_keyboard(stop_code, account_id),
         )
 
     async def handle_bus_fav_remove(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
-        if not await self._require_session(update):
+        account_id = await self._require_session(update)
+        if account_id is None:
             await query.answer()
             return
 
         await query.answer()
         stop_code = query.data.split(":", 1)[1]
-        self._bus_locations.remove_by_code(stop_code)
+        self._bus_locations_for(account_id).remove_by_code(stop_code)
 
         text = await self._format_arrivals(stop_code)
         await query.edit_message_text(
             f"🗑 Removed from preferred stops.\n\n{text}",
-            reply_markup=self._build_arrivals_keyboard(stop_code),
+            reply_markup=self._build_arrivals_keyboard(stop_code, account_id),
         )
 
     def _describe_stop(self, stop_code: str) -> str:
@@ -1095,8 +1156,8 @@ class NewsBot:
             return f"{stop['Description']} ({stop_code})"
         return f"Stop {stop_code}"
 
-    def _build_arrivals_keyboard(self, stop_code: str) -> InlineKeyboardMarkup:
-        if self._bus_locations.has_code(stop_code):
+    def _build_arrivals_keyboard(self, stop_code: str, account_id: str) -> InlineKeyboardMarkup:
+        if self._bus_locations_for(account_id).has_code(stop_code):
             fav_button = InlineKeyboardButton(
                 "🗑 Remove from preferred", callback_data=f"bus_fav_remove:{stop_code}"
             )
@@ -1107,7 +1168,7 @@ class NewsBot:
         return InlineKeyboardMarkup([[fav_button]])
 
     async def handle_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        if await self._require_session(update) is None:
             return
 
         if not self._bus_stops.is_available:
@@ -1153,7 +1214,7 @@ class NewsBot:
         return "\n".join(lines)
 
     async def handle_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self._require_session(update):
+        if await self._require_session(update) is None:
             return
         await update.message.reply_text("Unknown command.")
 
@@ -1166,7 +1227,7 @@ class NewsBot:
         chat_id = update.effective_chat.id
         attempt = (update.message.text or "").strip()
 
-        if self._password_gate.try_unlock(chat_id, attempt):
+        if self._accounts.try_unlock(chat_id, attempt) is not None:
             try:
                 await context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
             except Exception:
@@ -1189,11 +1250,11 @@ class NewsBot:
         context: ContextTypes.DEFAULT_TYPE,
         prompt: str,
         *,
-        chat_id: Optional[int] = None,
+        chat_id: Optional[Union[int, str]] = None,
     ) -> Optional[str]:
         """Runs prompt through Claude and returns the raw reply. Uses the
         Telegram chat's own Claude session by default; pass chat_id to
-        target a different one (e.g. the shared maintenance session).
+        target a different one (e.g. an account's maintenance session).
         Returns None if a busy/error message was already sent to the user
         and the caller should stop."""
         telegram_chat_id = update.effective_chat.id
@@ -1259,30 +1320,47 @@ class NewsBot:
             pass
 
     async def _reorganize_interests(self, app: Application) -> None:
-        # Shares the maintenance lock with /compileinterests so the two
-        # never run the same Claude session concurrently.
-        async with self._claude.lock_for(MAINTENANCE_CHAT_ID):
-            entries = self._interests.list()
+        for account_id in self._accounts.list_ids():
+            try:
+                await self._reorganize_account(app, account_id)
+            except Exception:
+                logger.exception("Interests reorganization failed for account %s", account_id)
+
+    async def _reorganize_account(self, app: Application, account_id: str) -> None:
+        # Shares the maintenance lock with /compileinterests (for this
+        # account) so the two never run the same Claude session concurrently.
+        maintenance_key = self._maintenance_key(account_id)
+        async with self._claude.lock_for(maintenance_key):
+            interests = self._interests_for(account_id)
+            entries = interests.list()
             if len(entries) < 2:
                 return  # nothing meaningful to merge or expand
 
             prompt = self._build_reorganize_prompt(entries)
-            raw_reply = await self._claude.run(MAINTENANCE_CHAT_ID, prompt)
+            raw_reply = await self._claude.run(maintenance_key, prompt)
             new_entries = InterestsStore.parse_entries(raw_reply)
             if not new_entries:
-                logger.warning("Interests reorganize returned nothing parseable, leaving interests.md untouched")
+                logger.warning(
+                    "Interests reorganize for %s returned nothing parseable, leaving its interests.md untouched",
+                    account_id,
+                )
                 return
 
-            self._interests.replace_all(new_entries)
-            logger.info("Reorganized interests: %d -> %d entries", len(entries), len(new_entries))
+            interests.replace_all(new_entries)
+            logger.info("Reorganized interests for %s: %d -> %d entries", account_id, len(entries), len(new_entries))
 
-        await self._notify_reorganized(app, len(entries), len(new_entries))
+        await self._notify_reorganized(app, account_id, len(entries), len(new_entries))
 
-    async def _notify_reorganized(self, app: Application, before_count: int, after_count: int) -> None:
+    async def _notify_reorganized(
+        self, app: Application, account_id: str, before_count: int, after_count: int
+    ) -> None:
         allowed = self._config.allowed_user_ids
         if not allowed:
             return
-        summary = f"🗂 Reorganized interests: {before_count} → {after_count} entries. See /getinterests."
+        summary = (
+            f"🗂 [{account_id}] Reorganized interests: {before_count} → {after_count} "
+            "entries. See /getinterests."
+        )
         for user_id in allowed:
             try:
                 await app.bot.send_message(chat_id=user_id, text=summary)

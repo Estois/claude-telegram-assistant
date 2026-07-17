@@ -4,9 +4,9 @@ __pycache__/
 .venv/
 venv/
 sessions.json
-password.hash
+accounts.hash
+accounts/
 trivia_cache.json
 trivia_state.json
 *.log
-bus_locations.json
 bus_stops_cache.json

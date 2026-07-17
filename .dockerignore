@@ -5,8 +5,8 @@ __pycache__
 *.pyc
 *.log
 .env
-password.hash
-bus_locations.json
+accounts.hash
+accounts/
 sessions.json
 trivia_cache.json
 trivia_state.json
