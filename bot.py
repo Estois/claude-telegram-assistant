@@ -1228,7 +1228,7 @@ class NewsBot:
         if account_id is None:
             return
 
-        if len(context.args) < 2:
+        if not context.args or len(context.args) < 2:
             await update.message.reply_text(
                 "Usage: /updateinterests <index> <topic>\nExample: /updateinterests 2 "
                 "also mention zero-day exploits"
@@ -1303,7 +1303,7 @@ class NewsBot:
         if await self._require_admin(update) is None:
             return
 
-        if len(context.args) != 2:
+        if not context.args or len(context.args) != 2:
             await update.message.reply_text("Usage: /adduser <name> <sha256passwordhash>")
             return
 
@@ -1331,7 +1331,7 @@ class NewsBot:
         if await self._require_admin(update) is None:
             return
 
-        if len(context.args) != 1:
+        if not context.args or len(context.args) != 1:
             await update.message.reply_text("Usage: /removeuser <name>")
             return
 
@@ -1351,7 +1351,7 @@ class NewsBot:
         if await self._require_admin(update) is None:
             return
 
-        if len(context.args) != 1 or not context.args[0].isdigit():
+        if not context.args or len(context.args) != 1 or not context.args[0].isdigit():
             await update.message.reply_text("Usage: /adduserteleid <telegram_user_id>")
             return
 
