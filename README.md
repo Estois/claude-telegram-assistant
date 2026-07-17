@@ -96,6 +96,30 @@ An account's directory (`accounts/<id>/interests.md`,
 time that account unlocks and touches interests or bus locations — nothing
 to set up by hand beyond the password itself.
 
+### Admin account
+
+One account is designated admin — by default the `amy` account, and only
+when unlocked from Telegram user id `100000001` (both `ADMIN_ACCOUNT_ID`
+and `ADMIN_TELEGRAM_USER_ID` are configurable in `.env`). Knowing the
+admin account's password from a *different* Telegram account isn't enough
+on its own, and being an allowed Telegram user with a different account's
+password isn't enough either — both checks have to pass.
+
+The admin gets three extra commands, usable only from an unlocked admin
+session:
+
+| Command | Does |
+| --- | --- |
+| `/adduser <name> <sha256hash>` | Creates account `<name>` with that password hash, or adds the hash to `<name>` if it already exists |
+| `/removeuser <name>` | Deletes `<name>`'s entry (header + all its hashes) from `accounts.hash`. Refuses to remove the admin account itself |
+| `/adduserteleid <telegram_user_id>` | Adds a Telegram user id to the allowlist — takes effect immediately, no restart needed, and is also written back to `TELEGRAM_ALLOWED_USER_IDS` in `.env` so it survives one |
+
+`/adduser` takes a ready-made hash, not a plaintext password — hash it
+first the same way as any other password: `printf '%s' 'theirpassword' |
+sha256sum`. A non-admin who sends any of these three commands gets the
+same animal-fact reply as an unrecognized command; there's no hint that
+admin-only commands exist at all.
+
 ### Trivia source
 
 Wrong-password replies pull from a local cache (`trivia_cache.json`) of
@@ -264,6 +288,9 @@ Optional environment variables (see `.env.example`):
 | `INTERESTS_REORGANIZE_INTERVAL_SECONDS` | `86400` | How often the background reorganize job runs per account; `0` disables it |
 | `BUS_STOPS_CACHE_FILE` | `bus_stops_cache.json` | Path to the nearest-stop lookup cache built by `fetch_bus_stops.py` |
 | `BUS_NEARBY_COUNT` | `3` | How many nearest stops to show as buttons when you share your location |
+| `ENV_FILE` | `.env` | Path `/adduserteleid` rewrites `TELEGRAM_ALLOWED_USER_IDS` in |
+| `ADMIN_ACCOUNT_ID` | `amy` | Account id allowed to use the admin commands (see Admin account) |
+| `ADMIN_TELEGRAM_USER_ID` | `100000001` | Telegram user id allowed to use the admin commands, alongside `ADMIN_ACCOUNT_ID` |
 
 ## Security
 

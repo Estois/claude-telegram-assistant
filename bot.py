@@ -58,6 +58,9 @@ class Config:
     base_dir: Path
     telegram_token: str
     allowed_user_ids: Optional[frozenset]
+    env_file: Path
+    admin_account_id: str
+    admin_telegram_user_id: int
     claude_bin: str
     claude_workdir: str
     claude_model: Optional[str]
@@ -93,6 +96,9 @@ class Config:
             base_dir=base_dir,
             telegram_token=token,
             allowed_user_ids=allowed_user_ids,
+            env_file=Path(os.environ.get("ENV_FILE", str(base_dir / ".env"))).resolve(),
+            admin_account_id=os.environ.get("ADMIN_ACCOUNT_ID", "amy"),
+            admin_telegram_user_id=int(os.environ.get("ADMIN_TELEGRAM_USER_ID", "100000001")),
             claude_bin=os.environ.get("CLAUDE_BIN", "claude"),
             claude_workdir=os.environ.get("CLAUDE_WORKDIR", str(base_dir)),
             claude_model=os.environ.get("CLAUDE_MODEL"),
@@ -172,15 +178,46 @@ class AccountStore:
         self._sessions.pop(chat_id, None)
         return was_unlocked
 
-    def _load_accounts(self) -> dict:
-        """Parses '# account: <id>' header lines, each followed by that
-        account's password hash(es), one per line, until the next header.
-        Hashes appearing before any header can't be attributed to an
-        account and are skipped with a warning."""
-        if not self._accounts_file.exists():
-            return {}
+    def add_hash(self, account_id: str, password_hash: str) -> bool:
+        """Adds a password hash to an account, creating it if it doesn't
+        exist yet. Returns True if the account was newly created, False if
+        the hash was added to (or already present on) an existing one."""
+        header, sections = self._parse_sections()
+        created = account_id not in sections
+        hashes = sections.setdefault(account_id, [])
+        digest = password_hash.strip().lower()
+        if digest not in hashes:
+            hashes.append(digest)
+        self._write_sections(header, sections)
+        return created
 
-        accounts: dict = {}
+    def remove_account(self, account_id: str) -> bool:
+        """Deletes an account's header and all its password hashes from the
+        accounts file. Returns whether the account existed."""
+        header, sections = self._parse_sections()
+        if account_id not in sections:
+            return False
+        del sections[account_id]
+        self._write_sections(header, sections)
+        return True
+
+    def _load_accounts(self) -> dict:
+        _, sections = self._parse_sections()
+        return {account_id: set(hashes) for account_id, hashes in sections.items()}
+
+    def _parse_sections(self):
+        """Parses the accounts file into (header_comment_lines, sections),
+        where sections is an ordered {account_id: [hash, ...]} dict built
+        from '# account: <id>' header lines followed by that account's
+        password hash(es), one per line, until the next header. Comment
+        lines before the first header are kept as-is so they survive a
+        rewrite; hashes appearing before any header can't be attributed to
+        an account and are dropped with a warning."""
+        if not self._accounts_file.exists():
+            return [], {}
+
+        header: list = []
+        sections: dict = {}
         current = None
         for raw_line in self._accounts_file.read_text().splitlines():
             line = raw_line.strip()
@@ -193,17 +230,74 @@ class AccountStore:
                     current = None
                     continue
                 current = candidate
-                accounts.setdefault(current, set())
+                sections.setdefault(current, [])
                 continue
             if line.startswith("#"):
+                if current is None:
+                    header.append(raw_line)
                 continue
             if current is None:
                 logger.warning(
                     "Password hash in %s before any '# account:' header, ignoring", self._accounts_file
                 )
                 continue
-            accounts[current].add(line.lower())
-        return accounts
+            if line.lower() not in sections[current]:
+                sections[current].append(line.lower())
+        return header, sections
+
+    def _write_sections(self, header: list, sections: dict) -> None:
+        blocks = []
+        if header:
+            blocks.append("\n".join(header))
+        for account_id, hashes in sections.items():
+            blocks.append("\n".join([f"# account: {account_id}"] + hashes))
+        self._accounts_file.write_text("\n\n".join(blocks) + "\n")
+
+
+class AllowlistStore:
+    """Tracks which Telegram user ids may talk to the bot at all — the
+    layer above accounts, checked before the password gate even applies.
+
+    Held in memory for immediate effect (so /adduserteleid works without a
+    restart) and persisted back to the TELEGRAM_ALLOWED_USER_IDS line in
+    the .env file so it survives one. An empty/unset allowlist means wide
+    open, matching Config.allowed_user_ids' existing meaning.
+    """
+
+    def __init__(self, env_file: Path, initial_ids: Optional[frozenset]):
+        self._env_file = env_file
+        self._ids: set = set(initial_ids) if initial_ids else set()
+
+    @property
+    def ids(self) -> Optional[frozenset]:
+        return frozenset(self._ids) if self._ids else None
+
+    def is_allowed(self, user_id: int) -> bool:
+        return not self._ids or user_id in self._ids
+
+    def add(self, user_id: int) -> bool:
+        """Returns True if the id was newly added, False if it was already
+        allowed."""
+        if user_id in self._ids:
+            return False
+        self._ids.add(user_id)
+        self._persist()
+        return True
+
+    def _persist(self) -> None:
+        ids_line = f"TELEGRAM_ALLOWED_USER_IDS={','.join(str(i) for i in sorted(self._ids))}"
+        if not self._env_file.exists():
+            self._env_file.write_text(ids_line + "\n")
+            return
+
+        lines = self._env_file.read_text().splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("TELEGRAM_ALLOWED_USER_IDS="):
+                lines[i] = ids_line
+                break
+        else:
+            lines.append(ids_line)
+        self._env_file.write_text("\n".join(lines) + "\n")
 
 
 class ClaudeSessionStore:
@@ -766,6 +860,7 @@ class NewsBot:
     def __init__(self, config: Config):
         self._config = config
         self._accounts = AccountStore(config.accounts_file, config.session_timeout_seconds)
+        self._allowlist = AllowlistStore(config.env_file, config.allowed_user_ids)
         self._sessions = ClaudeSessionStore(config.sessions_file)
         self._claude = ClaudeClient(config, self._sessions)
         self._trivia = TriviaBook(config.trivia_cache_file, config.trivia_state_file, FALLBACK_TRIVIA)
@@ -847,6 +942,9 @@ class NewsBot:
         app.add_handler(CommandHandler("getinterests", self.handle_get_interests))
         app.add_handler(CommandHandler("updateinterests", self.handle_update_interests))
         app.add_handler(CommandHandler("compileinterests", self.handle_compile_interests))
+        app.add_handler(CommandHandler("adduser", self.handle_add_user))
+        app.add_handler(CommandHandler("removeuser", self.handle_remove_user))
+        app.add_handler(CommandHandler("adduserteleid", self.handle_add_user_tele_id))
         app.add_handler(CommandHandler("bus", self.handle_bus))
         app.add_handler(CallbackQueryHandler(self.handle_bus_callback, pattern=r"^bus_stop:"))
         app.add_handler(CallbackQueryHandler(self.handle_bus_fav_add, pattern=r"^bus_fav_add:"))
@@ -860,7 +958,7 @@ class NewsBot:
         return app
 
     def _warn_about_missing_config(self) -> None:
-        if self._config.allowed_user_ids is None:
+        if self._allowlist.ids is None:
             logger.warning(
                 "TELEGRAM_ALLOWED_USER_IDS is not set - anyone who messages this bot can run "
                 "Claude Code with permission checks bypassed (%s). Set it before exposing this bot.",
@@ -877,13 +975,20 @@ class NewsBot:
             )
 
     def _is_authorized(self, update: Update) -> bool:
-        allowed = self._config.allowed_user_ids
-        if allowed is None:
-            return True
-        authorized = update.effective_user.id in allowed
+        authorized = self._allowlist.is_allowed(update.effective_user.id)
         if not authorized:
             logger.warning("Ignoring message from unauthorized user %s", update.effective_user.id)
         return authorized
+
+    def _is_admin(self, update: Update, account_id: str) -> bool:
+        """Admin commands require both the designated admin account AND the
+        designated admin's own Telegram user id — either alone isn't
+        enough, so knowing the admin account's password doesn't grant
+        admin powers from a different Telegram user."""
+        return (
+            account_id == self._config.admin_account_id
+            and update.effective_user.id == self._config.admin_telegram_user_id
+        )
 
     async def _require_session(self, update: Update) -> Optional[str]:
         """Every command runs behind the password gate. The one exception is
@@ -901,6 +1006,19 @@ class NewsBot:
             # callback-query updates, where .message is None but
             # .callback_query.message holds the original message.
             await update.effective_message.reply_text("🔒 Locked. Send the password to start a session.")
+            return None
+        return account_id
+
+    async def _require_admin(self, update: Update) -> Optional[str]:
+        """Like _require_session, but for the admin-only commands. Non-admin
+        callers (wrong account, wrong Telegram user, or not even unlocked)
+        get the same trivia reply as an unrecognized command — no hint that
+        an admin command exists, let alone which check failed."""
+        account_id = await self._require_session(update)
+        if account_id is None:
+            return None
+        if not self._is_admin(update, account_id):
+            await update.message.reply_text(self._trivia.next_fact())
             return None
         return account_id
 
@@ -1087,6 +1205,70 @@ class NewsBot:
     @staticmethod
     def _format_interests_listing(entries: list) -> str:
         return "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, start=1))
+
+    # -- Admin commands -----------------------------------------------------
+
+    async def handle_add_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._require_admin(update) is None:
+            return
+
+        if len(context.args) != 2:
+            await update.message.reply_text("Usage: /adduser <name> <sha256passwordhash>")
+            return
+
+        name, password_hash = context.args
+        if not AccountStore.ACCOUNT_ID_PATTERN.match(name):
+            await update.message.reply_text(
+                "Name must be letters, digits, - or _ only (it's used as a folder name)."
+            )
+            return
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", password_hash):
+            await update.message.reply_text(
+                "That doesn't look like a SHA256 hex digest (64 hex characters). "
+                "Generate one with: printf '%s' 'password' | sha256sum"
+            )
+            return
+
+        created = self._accounts.add_hash(name, password_hash)
+        await update.message.reply_text(
+            f"Created account '{name}' with 1 password."
+            if created
+            else f"Added a password to existing account '{name}'."
+        )
+
+    async def handle_remove_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._require_admin(update) is None:
+            return
+
+        if len(context.args) != 1:
+            await update.message.reply_text("Usage: /removeuser <name>")
+            return
+
+        name = context.args[0]
+        if name == self._config.admin_account_id:
+            await update.message.reply_text("Refusing to remove the admin account.")
+            return
+
+        removed = self._accounts.remove_account(name)
+        await update.message.reply_text(
+            f"Removed account '{name}' from {self._config.accounts_file.name}."
+            if removed
+            else f"No account named '{name}'."
+        )
+
+    async def handle_add_user_tele_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._require_admin(update) is None:
+            return
+
+        if len(context.args) != 1 or not context.args[0].isdigit():
+            await update.message.reply_text("Usage: /adduserteleid <telegram_user_id>")
+            return
+
+        user_id = int(context.args[0])
+        added = self._allowlist.add(user_id)
+        await update.message.reply_text(
+            f"Added {user_id} to the allowlist." if added else f"{user_id} is already allowed."
+        )
 
     async def handle_bus(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -1368,7 +1550,7 @@ class NewsBot:
     async def _notify_reorganized(
         self, app: Application, account_id: str, before_count: int, after_count: int
     ) -> None:
-        allowed = self._config.allowed_user_ids
+        allowed = self._allowlist.ids
         if not allowed:
             return
         summary = (
