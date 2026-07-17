@@ -944,7 +944,10 @@ class NewsBot:
                 "endsession", "/endsession",
                 "end the current session now", self.handle_end_session,
             ),
-            CommandSpec("new", "/new", "start a fresh conversation", self.handle_new),
+            CommandSpec(
+                "clearclaudememory", "/clearclaudememory",
+                "clear Claude's memory of this conversation and start fresh", self.handle_clear_claude_memory,
+            ),
             CommandSpec("help", "/help", "show this message", self.handle_help),
             CommandSpec(
                 "adduser", "/adduser <name> <sha256hash>",
@@ -1148,11 +1151,11 @@ class NewsBot:
             return
         await update.message.reply_text(self._build_help_text(self._is_admin(update, account_id)))
 
-    async def handle_new(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_clear_claude_memory(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._require_session(update) is None:
             return
         self._sessions.clear(update.effective_chat.id)
-        await update.message.reply_text("Started a new conversation.")
+        await update.message.reply_text("Cleared Claude's memory.")
 
     async def handle_end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._require_session(update) is None:

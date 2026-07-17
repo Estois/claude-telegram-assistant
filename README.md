@@ -6,7 +6,8 @@ The bot only responds to a fixed set of commands — it does not relay
 arbitrary text to Claude. Each command maps to a preset prompt that's run
 through the `claude` CLI (`claude -p`), and the reply is sent back on
 Telegram. Each Telegram chat keeps its own Claude session, so follow-up
-messages continue the same conversation; use `/new` to start over.
+messages continue the same conversation; use `/clearclaudememory` to start
+over.
 
 ## Commands
 
@@ -24,7 +25,7 @@ whichever account your password unlocked (see Accounts).
 | `/compileinterests` | Runs the same merge/enrich pass the background job runs periodically, on demand |
 | `/bus` | Bus arrival times — pick a preset stop, or share your location for the nearest ones |
 | `/endsession` | Ends the current session immediately, instead of waiting out the timeout |
-| `/new` | Resets the conversation for this chat |
+| `/clearclaudememory` | Clears Claude's memory of this conversation and starts fresh |
 | `/help` | Lists commands |
 
 Interests are stored as a numbered list in `accounts/<id>/interests.md` —
