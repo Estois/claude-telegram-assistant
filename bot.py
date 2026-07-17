@@ -404,15 +404,17 @@ class NewsBot:
     def _build_help_text(self) -> str:
         minutes = self._config.session_timeout_seconds // 60
         return (
+            "Every command needs an unlocked session — send the password as a plain "
+            f"message first (lasts {minutes} minutes).\n\n"
             "Commands:\n"
-            "/news <subject> — news digest on a subject, biased toward your interests. "
-            "Requires an unlocked session — send the password as a plain message first "
-            f"(lasts {minutes} minutes).\n"
+            "/news <subject> — news digest on a subject, biased toward your interests\n"
             "/addinterests <topic> — add an interest (word, sentence, or paragraph)\n"
             "/getinterests — list your interests with their index\n"
             "/updateinterests <index> <topic> — revise or rewrite an interest "
-            "(Claude decides which); requires an unlocked session\n"
-            "/endsession — end the current unlocked session now\n"
+            "(Claude decides which)\n"
+            "/compileinterests — merge duplicate interests and add retrieval detail now "
+            "(runs automatically too)\n"
+            "/endsession — end the current session now\n"
             "/new — start a fresh conversation\n"
             "/help — show this message"
         )
@@ -433,6 +435,7 @@ class NewsBot:
         app.add_handler(CommandHandler("addinterests", self.handle_add_interests))
         app.add_handler(CommandHandler("getinterests", self.handle_get_interests))
         app.add_handler(CommandHandler("updateinterests", self.handle_update_interests))
+        app.add_handler(CommandHandler("compileinterests", self.handle_compile_interests))
         app.add_handler(MessageHandler(filters.COMMAND, self.handle_unknown_command))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_plain_text))
         return app
@@ -463,6 +466,19 @@ class NewsBot:
         if not authorized:
             logger.warning("Ignoring message from unauthorized user %s", update.effective_user.id)
         return authorized
+
+    async def _require_session(self, update: Update) -> bool:
+        """Every command runs behind the password gate. The one exception is
+        handle_plain_text, which is the unlock mechanism itself — gating it
+        too would make it impossible to ever unlock. Checks authorization
+        first; unauthorized senders get silence, not a lock notice, so the
+        bot doesn't confirm its own existence to strangers."""
+        if not self._is_authorized(update):
+            return False
+        if not self._password_gate.is_unlocked(update.effective_chat.id):
+            await update.message.reply_text("🔒 Locked. Send the password to start a session.")
+            return False
+        return True
 
     def _build_news_prompt(self, subject: str) -> str:
         interests_file = self._config.news_interests_file
@@ -515,34 +531,29 @@ class NewsBot:
     # -- Command handlers -------------------------------------------------
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_authorized(update):
+        if not await self._require_session(update):
             return
         await update.message.reply_text("Hi!")
 
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_authorized(update):
+        if not await self._require_session(update):
             return
         await update.message.reply_text(self._help_text)
 
     async def handle_new(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_authorized(update):
+        if not await self._require_session(update):
             return
         self._sessions.clear(update.effective_chat.id)
         await update.message.reply_text("Started a new conversation.")
 
     async def handle_end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_authorized(update):
+        if not await self._require_session(update):
             return
         ended = self._password_gate.lock(update.effective_chat.id)
         await update.message.reply_text("Session ended." if ended else "No active session.")
 
     async def handle_news(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_authorized(update):
-            return
-
-        chat_id = update.effective_chat.id
-        if not self._password_gate.is_unlocked(chat_id):
-            await update.message.reply_text("🔒 Locked. Send the password to start a session.")
+        if not await self._require_session(update):
             return
 
         if not context.args:
@@ -555,7 +566,7 @@ class NewsBot:
             await self._send_formatted(update, reply)
 
     async def handle_add_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_authorized(update):
+        if not await self._require_session(update):
             return
         if not context.args:
             await update.message.reply_text(
@@ -568,7 +579,7 @@ class NewsBot:
         await update.message.reply_text(f"Added as interest #{index}.")
 
     async def handle_get_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_authorized(update):
+        if not await self._require_session(update):
             return
         entries = self._interests.list()
         if not entries:
@@ -578,12 +589,7 @@ class NewsBot:
         await update.message.reply_text(listing)
 
     async def handle_update_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_authorized(update):
-            return
-
-        chat_id = update.effective_chat.id
-        if not self._password_gate.is_unlocked(chat_id):
-            await update.message.reply_text("🔒 Locked. Send the password to start a session.")
+        if not await self._require_session(update):
             return
 
         if len(context.args) < 2:
@@ -618,8 +624,35 @@ class NewsBot:
         self._interests.update(index, new_text)
         await update.message.reply_text(f"Updated interest #{index}.")
 
+    async def handle_compile_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Manual trigger for the same reorganization the background job
+        runs periodically: merge duplicate/overlapping interests and add
+        retrieval-helpful detail."""
+        if not await self._require_session(update):
+            return
+
+        entries = self._interests.list()
+        if len(entries) < 2:
+            await update.message.reply_text("Need at least 2 interests to reorganize. See /getinterests.")
+            return
+
+        prompt = self._build_reorganize_prompt(entries)
+        raw_reply = await self._run_claude(update, context, prompt, chat_id=MAINTENANCE_CHAT_ID)
+        if raw_reply is None:
+            return
+
+        new_entries = InterestsStore.parse_entries(raw_reply)
+        if not new_entries:
+            await update.message.reply_text("Reorganize returned nothing usable — no changes made.")
+            return
+
+        self._interests.replace_all(new_entries)
+        await update.message.reply_text(
+            f"🗂 Reorganized interests: {len(entries)} → {len(new_entries)} entries. See /getinterests."
+        )
+
     async def handle_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_authorized(update):
+        if not await self._require_session(update):
             return
         await update.message.reply_text("Unknown command.")
 
@@ -650,21 +683,30 @@ class NewsBot:
     # -- Claude dispatch ----------------------------------------------------
 
     async def _run_claude(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        prompt: str,
+        *,
+        chat_id: Optional[int] = None,
     ) -> Optional[str]:
-        """Runs prompt through Claude for this chat and returns the raw
-        reply. Returns None if a busy/error message was already sent to the
-        user and the caller should stop."""
-        chat_id = update.effective_chat.id
-        lock = self._claude.lock_for(chat_id)
+        """Runs prompt through Claude and returns the raw reply. Uses the
+        Telegram chat's own Claude session by default; pass chat_id to
+        target a different one (e.g. the shared maintenance session).
+        Returns None if a busy/error message was already sent to the user
+        and the caller should stop."""
+        telegram_chat_id = update.effective_chat.id
+        claude_chat_id = chat_id if chat_id is not None else telegram_chat_id
+
+        lock = self._claude.lock_for(claude_chat_id)
         if lock.locked():
             await update.message.reply_text("Still working on your last request — hang on.")
             return None
 
         async with lock:
-            keep_typing = asyncio.create_task(self._keep_typing(context, chat_id))
+            keep_typing = asyncio.create_task(self._keep_typing(context, telegram_chat_id))
             try:
-                return await self._claude.run(chat_id, prompt)
+                return await self._claude.run(claude_chat_id, prompt)
             except Exception as exc:
                 logger.exception("claude invocation failed")
                 await update.message.reply_text(f"Something went wrong: {exc}")
@@ -716,19 +758,23 @@ class NewsBot:
             pass
 
     async def _reorganize_interests(self, app: Application) -> None:
-        entries = self._interests.list()
-        if len(entries) < 2:
-            return  # nothing meaningful to merge or expand
+        # Shares the maintenance lock with /compileinterests so the two
+        # never run the same Claude session concurrently.
+        async with self._claude.lock_for(MAINTENANCE_CHAT_ID):
+            entries = self._interests.list()
+            if len(entries) < 2:
+                return  # nothing meaningful to merge or expand
 
-        prompt = self._build_reorganize_prompt(entries)
-        raw_reply = await self._claude.run(MAINTENANCE_CHAT_ID, prompt)
-        new_entries = InterestsStore.parse_entries(raw_reply)
-        if not new_entries:
-            logger.warning("Interests reorganize returned nothing parseable, leaving interests.md untouched")
-            return
+            prompt = self._build_reorganize_prompt(entries)
+            raw_reply = await self._claude.run(MAINTENANCE_CHAT_ID, prompt)
+            new_entries = InterestsStore.parse_entries(raw_reply)
+            if not new_entries:
+                logger.warning("Interests reorganize returned nothing parseable, leaving interests.md untouched")
+                return
 
-        self._interests.replace_all(new_entries)
-        logger.info("Reorganized interests: %d -> %d entries", len(entries), len(new_entries))
+            self._interests.replace_all(new_entries)
+            logger.info("Reorganized interests: %d -> %d entries", len(entries), len(new_entries))
+
         await self._notify_reorganized(app, len(entries), len(new_entries))
 
     async def _notify_reorganized(self, app: Application, before_count: int, after_count: int) -> None:
