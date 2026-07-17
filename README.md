@@ -21,6 +21,7 @@ without the password first.
 | `/getinterests` | Lists your interests with their index |
 | `/updateinterests <index> <topic>` | Revises the interest at `<index>` — Claude decides whether `<topic>` adds detail to it or replaces it outright |
 | `/compileinterests` | Runs the same merge/enrich pass the background job runs periodically, on demand |
+| `/bus` | Bus arrival times — pick a preset stop, or share your location for the nearest ones |
 | `/endsession` | Ends the current session immediately, instead of waiting out the timeout |
 | `/new` | Resets the conversation for this chat |
 | `/help` | Lists commands |
@@ -101,6 +102,40 @@ in `bot.py`) — 🐕 for "American Leopard Hound", 🦕 for "Parasaurolophus",
 Tuned against the actual cache: ~99.8% of its ~600 distinct animal names
 get a specific match.
 
+## Bus arrivals
+
+`/bus` pulls real-time arrival times from Singapore's LTA DataMall API.
+
+1. Sign up for a free API key at
+   [datamall.lta.gov.sg](https://datamall.lta.gov.sg/content/datamall/en/request-for-api.html)
+   and set `LTA_API_KEY` in `.env`.
+2. Edit `bus_locations.json` (start from `bus_locations.example.json`) —
+   a flat `{"name": "busStopCode"}` map shown as `/bus`'s preset buttons.
+   Find a stop's code on its physical signage, or via
+   [OneMap](https://www.onemap.gov.sg/)/Google Maps.
+3. For the "share my location" path specifically (preset buttons work
+   without this), build the nearest-stop lookup cache:
+
+   ```bash
+   python fetch_bus_stops.py
+   ```
+
+   Pages through LTA's static bus stop dataset (~5000 stops) into
+   `bus_stops_cache.json`. Re-run occasionally to pick up new stops —
+   LTA doesn't publish a changelog, so there's no reliable auto-refresh
+   trigger; this is a manual, infrequent maintenance step.
+
+`/bus` shows one inline keyboard: your preset locations as buttons, plus a
+"📍 Send my location" button. Telegram doesn't allow inline buttons to
+trigger native location sharing directly (only the separate reply-keyboard
+UI can do that), so tapping it instead edits the message with instructions
+to reply to it with your location (📎 → Location) — the bot picks up that
+reply the same way as any shared location. Sharing your location shows the
+nearest `BUS_NEARBY_COUNT` stops (default 3) as buttons — bus stops
+usually come in direction-opposite pairs across a road, so picking from a
+short list beats guessing from the single nearest one. Tapping any stop
+button (preset or nearby) fetches and displays live arrivals for it.
+
 ## Setup
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token it gives you.
@@ -147,6 +182,9 @@ Optional environment variables (see `.env.example`):
 | `CLAUDE_MODEL` | CLI default | Model alias or name to pass to `--model` |
 | `CLAUDE_PERMISSION_MODE` | `bypassPermissions` | Passed to `--permission-mode`; see Security below |
 | `CLAUDE_TIMEOUT_SECONDS` | `600` | Kill the `claude` process if it runs longer than this |
+| `BUS_LOCATIONS_FILE` | `bus_locations.json` | Path to /bus's preset-location map |
+| `BUS_STOPS_CACHE_FILE` | `bus_stops_cache.json` | Path to the nearest-stop lookup cache built by `fetch_bus_stops.py` |
+| `BUS_NEARBY_COUNT` | `3` | How many nearest stops to show as buttons when you share your location |
 
 ## Security
 

@@ -9,21 +9,31 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
 import random
 import re
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 # Third-party
+import httpx
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 load_dotenv()
 
@@ -65,6 +75,10 @@ class Config:
     sessions_file: Path
     trivia_cache_file: Path
     trivia_state_file: Path
+    lta_api_key: Optional[str]
+    bus_locations_file: Path
+    bus_stops_cache_file: Path
+    bus_nearby_count: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -103,6 +117,14 @@ class Config:
             sessions_file=base_dir / "sessions.json",
             trivia_cache_file=base_dir / "trivia_cache.json",
             trivia_state_file=base_dir / "trivia_state.json",
+            lta_api_key=os.environ.get("LTA_API_KEY"),
+            bus_locations_file=Path(
+                os.environ.get("BUS_LOCATIONS_FILE", str(base_dir / "bus_locations.json"))
+            ).resolve(),
+            bus_stops_cache_file=Path(
+                os.environ.get("BUS_STOPS_CACHE_FILE", str(base_dir / "bus_stops_cache.json"))
+            ).resolve(),
+            bus_nearby_count=int(os.environ.get("BUS_NEARBY_COUNT", "3")),
         )
 
 
@@ -574,6 +596,110 @@ class TelegramFormatter:
         return chunks
 
 
+class LtaBusClient:
+    """Wraps Singapore LTA DataMall's real-time bus arrival API."""
+
+    BASE_URL = "https://datamall2.mytransport.sg/ltaodataservice"
+
+    def __init__(self, api_key: Optional[str]):
+        self._api_key = api_key
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self._api_key)
+
+    async def get_arrivals(self, bus_stop_code: str) -> list:
+        """Returns services sorted by number, each as
+        {"service_no": "21", "arrivals": ["2 min", "Arr", "15 min"]}."""
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{self.BASE_URL}/v3/BusArrival",
+                params={"BusStopCode": bus_stop_code},
+                headers={"AccountKey": self._api_key, "accept": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        return self._parse_services(data)
+
+    @classmethod
+    def _parse_services(cls, data: dict) -> list:
+        services = []
+        for svc in data.get("Services", []):
+            arrivals = [
+                cls._format_eta(svc.get(key, {}).get("EstimatedArrival"))
+                for key in ("NextBus", "NextBus2", "NextBus3")
+            ]
+            services.append({"service_no": svc["ServiceNo"], "arrivals": arrivals})
+
+        services.sort(key=lambda s: s["service_no"])
+        return services
+
+    @staticmethod
+    def _format_eta(eta_iso: Optional[str]) -> str:
+        if not eta_iso:
+            return "—"
+        arrival = datetime.fromisoformat(eta_iso)
+        minutes = round((arrival - datetime.now(arrival.tzinfo)).total_seconds() / 60)
+        return "Arr" if minutes <= 0 else f"{minutes} min"
+
+
+class BusStopsCache:
+    """Loads the static LTA bus-stops dataset (built by fetch_bus_stops.py)
+    for nearest-stop lookups from a live location."""
+
+    def __init__(self, cache_file: Path):
+        self._cache_file = cache_file
+
+    @property
+    def is_available(self) -> bool:
+        return self._cache_file.exists()
+
+    def nearest(self, lat: float, lon: float, count: int) -> list:
+        stops = self._load()
+        for stop in stops:
+            stop["distance_m"] = self._haversine_m(
+                lat, lon, stop["Latitude"], stop["Longitude"]
+            )
+        stops.sort(key=lambda s: s["distance_m"])
+        return stops[:count]
+
+    def _load(self) -> list:
+        if not self._cache_file.exists():
+            return []
+        try:
+            return json.loads(self._cache_file.read_text())
+        except json.JSONDecodeError:
+            logger.exception("%s is corrupt", self._cache_file)
+            return []
+
+    @staticmethod
+    def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        earth_radius_m = 6371000
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlambda = math.radians(lon2 - lon1)
+        a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+        return 2 * earth_radius_m * math.asin(math.sqrt(a))
+
+
+class BusLocationsStore:
+    """Read-only loader for the name -> bus stop code mapping shown as
+    /bus's preset location buttons. Hand-edited directly on disk."""
+
+    def __init__(self, path: Path):
+        self._path = path
+
+    def list(self) -> dict:
+        if not self._path.exists():
+            return {}
+        try:
+            return json.loads(self._path.read_text())
+        except json.JSONDecodeError:
+            logger.exception("%s is corrupt", self._path)
+            return {}
+
+
 class NewsBot:
     """Wires the Telegram handlers together with the services above."""
 
@@ -584,6 +710,9 @@ class NewsBot:
         self._claude = ClaudeClient(config, self._sessions)
         self._trivia = TriviaBook(config.trivia_cache_file, config.trivia_state_file, FALLBACK_TRIVIA)
         self._interests = InterestsStore(config.news_interests_file)
+        self._lta = LtaBusClient(config.lta_api_key)
+        self._bus_stops = BusStopsCache(config.bus_stops_cache_file)
+        self._bus_locations = BusLocationsStore(config.bus_locations_file)
         self._help_text = self._build_help_text()
         self._reorganize_task: Optional[asyncio.Task] = None
 
@@ -604,6 +733,7 @@ class NewsBot:
             "(Claude decides which)\n"
             "/compileinterests — merge duplicate interests and add retrieval detail now "
             "(runs automatically too)\n"
+            "/bus — bus arrival times, from a preset stop or your live location\n"
             "/endsession — end the current session now\n"
             "/new — start a fresh conversation\n"
             "/help — show this message"
@@ -626,6 +756,12 @@ class NewsBot:
         app.add_handler(CommandHandler("getinterests", self.handle_get_interests))
         app.add_handler(CommandHandler("updateinterests", self.handle_update_interests))
         app.add_handler(CommandHandler("compileinterests", self.handle_compile_interests))
+        app.add_handler(CommandHandler("bus", self.handle_bus))
+        app.add_handler(CallbackQueryHandler(self.handle_bus_callback, pattern=r"^bus_stop:"))
+        app.add_handler(
+            CallbackQueryHandler(self.handle_bus_request_location, pattern=r"^bus_request_location$")
+        )
+        app.add_handler(MessageHandler(filters.LOCATION, self.handle_location))
         app.add_handler(MessageHandler(filters.COMMAND, self.handle_unknown_command))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_plain_text))
         return app
@@ -647,6 +783,10 @@ class NewsBot:
                 "No password hash in %s — /news will stay locked until you add one.",
                 self._config.password_hash_file,
             )
+        if not self._lta.is_configured:
+            logger.warning(
+                "LTA_API_KEY is not set — /bus will not be able to fetch arrival times."
+            )
 
     def _is_authorized(self, update: Update) -> bool:
         allowed = self._config.allowed_user_ids
@@ -666,7 +806,10 @@ class NewsBot:
         if not self._is_authorized(update):
             return False
         if not self._password_gate.is_unlocked(update.effective_chat.id):
-            await update.message.reply_text("🔒 Locked. Send the password to start a session.")
+            # effective_message (not .message) so this also works for
+            # callback-query updates, where .message is None but
+            # .callback_query.message holds the original message.
+            await update.effective_message.reply_text("🔒 Locked. Send the password to start a session.")
             return False
         return True
 
@@ -840,6 +983,91 @@ class NewsBot:
         await update.message.reply_text(
             f"🗂 Reorganized interests: {len(entries)} → {len(new_entries)} entries. See /getinterests."
         )
+
+    async def handle_bus(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self._require_session(update):
+            return
+
+        locations = self._bus_locations.list()
+        buttons = [
+            [InlineKeyboardButton(name, callback_data=f"bus_stop:{code}")]
+            for name, code in locations.items()
+        ]
+        buttons.append(
+            [InlineKeyboardButton("📍 Send my location", callback_data="bus_request_location")]
+        )
+        await update.message.reply_text("Pick a stop:", reply_markup=InlineKeyboardMarkup(buttons))
+
+    async def handle_bus_request_location(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        query = update.callback_query
+        if not await self._require_session(update):
+            await query.answer()
+            return
+
+        await query.answer()
+        await query.edit_message_text(
+            "Reply to this message with your location — tap 📎 (attach) and choose "
+            "Location — and I'll show the nearest stops."
+        )
+
+    async def handle_bus_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not await self._require_session(update):
+            await query.answer()
+            return
+
+        await query.answer()
+        stop_code = query.data.split(":", 1)[1]
+        text = await self._format_arrivals(stop_code)
+        await query.edit_message_text(text)
+
+    async def handle_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self._require_session(update):
+            return
+
+        if not self._bus_stops.is_available:
+            await update.message.reply_text(
+                "Nearby-stop lookup isn't set up yet — run fetch_bus_stops.py first, "
+                "or use a preset location via /bus."
+            )
+            return
+
+        loc = update.message.location
+        nearest = self._bus_stops.nearest(loc.latitude, loc.longitude, self._config.bus_nearby_count)
+        if not nearest:
+            await update.message.reply_text("No bus stops found nearby.")
+            return
+
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    f"{stop['Description']} ({int(stop['distance_m'])}m)",
+                    callback_data=f"bus_stop:{stop['BusStopCode']}",
+                )
+            ]
+            for stop in nearest
+        ]
+        await update.message.reply_text("Nearest stops:", reply_markup=InlineKeyboardMarkup(buttons))
+
+    async def _format_arrivals(self, stop_code: str) -> str:
+        if not self._lta.is_configured:
+            return "LTA_API_KEY is not configured — can't fetch arrival times."
+
+        try:
+            services = await self._lta.get_arrivals(stop_code)
+        except Exception:
+            logger.exception("LTA bus arrival lookup failed for stop %s", stop_code)
+            return f"Couldn't fetch arrival times for stop {stop_code}. Try again shortly."
+
+        if not services:
+            return f"🚌 Stop {stop_code}\nNo bus data available right now."
+
+        lines = [f"🚌 Stop {stop_code}"]
+        for svc in services:
+            lines.append(f"Svc {svc['service_no']}: " + ", ".join(svc["arrivals"]))
+        return "\n".join(lines)
 
     async def handle_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._require_session(update):

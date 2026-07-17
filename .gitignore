@@ -8,3 +8,5 @@ password.hash
 trivia_cache.json
 trivia_state.json
 *.log
+bus_locations.json
+bus_stops_cache.json
