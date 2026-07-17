@@ -1077,10 +1077,14 @@ class NewsBot:
         """Every command runs behind the password gate. The one exception is
         handle_plain_text, which is the unlock mechanism itself — gating it
         too would make it impossible to ever unlock. Checks authorization
-        first; unauthorized senders get silence, not a lock notice, so the
-        bot doesn't confirm its own existence to strangers. Returns the
+        first; unauthorized senders get silence, so the bot doesn't confirm
+        its own existence to strangers. A locked-but-authorized sender gets
+        the same random animal-fact reply as an unrecognized command or
+        wrong password, never a "locked" notice — that string would confirm
+        the command exists and the bot uses a password gate, information an
+        attacker probing the bot shouldn't get for free. Returns the
         unlocked account id, or None if the caller should stop (already
-        replied with the lock notice in that case)."""
+        replied with trivia in that case)."""
         if not self._is_authorized(update):
             return None
         account_id = self._accounts.account_for(update.effective_chat.id)
@@ -1088,7 +1092,7 @@ class NewsBot:
             # effective_message (not .message) so this also works for
             # callback-query updates, where .message is None but
             # .callback_query.message holds the original message.
-            await update.effective_message.reply_text("🔒 Locked. Send the password to start a session.")
+            await update.effective_message.reply_text(self._trivia.next_fact())
             return None
         return account_id
 

@@ -91,15 +91,18 @@ class HandleGetUsersTests(AsyncBotTestCase):
         self.assertNotIn("🟢 active", update.message.replies[0])
         self.assertNotIn("🔒 locked", update.message.replies[0])
 
-    async def test_locked_chat_gets_the_lock_notice_not_the_listing(self):
+    async def test_locked_chat_gets_trivia_not_a_lock_notice_or_the_listing(self):
         news_bot = self._make_bot()
         update = FakeUpdate(user_id=self.ADMIN_TELEGRAM_USER_ID, chat_id=1)
 
         await news_bot.handle_get_users(update, FakeContext())
 
-        self.assertEqual(
-            update.message.replies, ["🔒 Locked. Send the password to start a session."]
-        )
+        self.assertEqual(len(update.message.replies), 1)
+        reply = update.message.replies[0]
+        self.assertNotIn("🔒 locked", reply)
+        self.assertNotIn("🟢 active", reply)
+        self.assertNotIn("Locked", reply)
+        self.assertIn("fact:", reply)
 
 
 if __name__ == "__main__":

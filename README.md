@@ -47,17 +47,22 @@ account — it shares a lock with the background job so the two never run
 concurrently and step on each other's edits. Its reply includes the full
 reorganized list, same as `/getinterests`.
 
-Unrecognized commands get a short reply pointing to `/help`. Plain text
-messages are never sent to Claude — see Accounts below.
+Unrecognized commands get a random animal-fact reply, same as a locked
+command or a wrong password attempt — never an error, and never a hint
+about what commands exist. Plain text messages are never sent to Claude
+— see Accounts below.
 
 ## Accounts
 
 Every command is gated behind a password — even ones like `/help` or
-`/addinterests` that don't touch Claude. A locked command gets only
-"🔒 Locked. Send the password to start a session," never the command's
-actual output, so `/help`'s command list stays hidden until unlocked. The
-one exception is plain text itself, which is the unlock mechanism and
-can't be gated behind its own gate.
+`/addinterests` that don't touch Claude. A locked command gets the same
+random animal-fact reply as an unrecognized command or a wrong password,
+never a "locked" notice or the command's actual output — a "locked"
+message would itself confirm the command exists and that the bot uses a
+password gate, which an attacker probing the bot shouldn't learn for
+free. So `/help`'s command list stays hidden until unlocked, same as
+everything else. The one exception is plain text itself, which is the
+unlock mechanism and can't be gated behind its own gate.
 
 Which password you send determines which **account** your session unlocks
 as. Each account has its own isolated interests list and preferred bus
