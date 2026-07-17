@@ -41,7 +41,8 @@ automatically; each allowed user gets a one-line Telegram notification
 when it changes anything. Set the interval to `0` to disable it. Run
 `/compileinterests` to trigger the same pass on demand — it shares a lock
 with the background job so the two never run concurrently and step on
-each other's edits.
+each other's edits. Its reply includes the full reorganized list, same as
+`/getinterests`.
 
 Unrecognized commands get a short reply pointing to `/help`. Plain text
 messages are never sent to Claude — see Password / session below.

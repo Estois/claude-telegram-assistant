@@ -918,8 +918,7 @@ class NewsBot:
         if not entries:
             await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
             return
-        listing = "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, start=1))
-        await update.message.reply_text(listing)
+        await update.message.reply_text(self._format_interests_listing(entries))
 
     async def handle_update_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._require_session(update):
@@ -980,9 +979,14 @@ class NewsBot:
             return
 
         self._interests.replace_all(new_entries)
+        summary = f"🗂 Reorganized interests: {len(entries)} → {len(new_entries)} entries."
         await update.message.reply_text(
-            f"🗂 Reorganized interests: {len(entries)} → {len(new_entries)} entries. See /getinterests."
+            f"{summary}\n\n{self._format_interests_listing(new_entries)}"
         )
+
+    @staticmethod
+    def _format_interests_listing(entries: list) -> str:
+        return "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, start=1))
 
     async def handle_bus(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._require_session(update):
