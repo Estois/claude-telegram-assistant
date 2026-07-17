@@ -1,5 +1,5 @@
 import bot
-from helpers import BotTestCase, write_accounts_file
+from tests.helpers import BotTestCase, write_accounts_file
 
 
 class AccountStoreTests(BotTestCase):

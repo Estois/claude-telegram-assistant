@@ -1,5 +1,5 @@
 import bot
-from helpers import BotTestCase
+from tests.helpers import BotTestCase
 
 
 class InterestsStoreTests(BotTestCase):

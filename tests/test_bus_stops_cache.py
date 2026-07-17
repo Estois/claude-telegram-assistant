@@ -1,7 +1,7 @@
 import json
 
 import bot
-from helpers import BotTestCase
+from tests.helpers import BotTestCase
 
 STOPS = [
     {"BusStopCode": "A", "Description": "Very close stop", "Latitude": 1.3001, "Longitude": 103.8001},
