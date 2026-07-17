@@ -56,7 +56,10 @@ can't be gated behind its own gate.
 
 1. Pick a password and hash it: `printf '%s' 'yourpassword' | sha256sum`.
 2. Open `password.hash` in this directory and put the hex digest on its own
-   line (the file has instructions in it as comments).
+   line (the file has instructions in it as comments). Add more digests on
+   their own lines for more passwords — any of them unlocks a session,
+   useful for giving a second person or device their own password without
+   sharing yours.
 3. In Telegram, send the plain-text password (not a command) as a message.
    If it matches, the bot deletes that message immediately, permanently
    removing the password from the chat, and starts a session.

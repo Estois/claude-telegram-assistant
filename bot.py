@@ -121,17 +121,17 @@ class PasswordGate:
 
     @property
     def is_configured(self) -> bool:
-        return self._load_hash() is not None
+        return bool(self._load_hashes())
 
     def is_unlocked(self, chat_id: int) -> bool:
         expiry = self._unlocked_until.get(chat_id)
         return expiry is not None and time.monotonic() < expiry
 
     def try_unlock(self, chat_id: int, attempt: str) -> bool:
-        expected_hash = self._load_hash()
-        if not expected_hash:
+        hashes = self._load_hashes()
+        if not hashes:
             return False
-        if hashlib.sha256(attempt.encode()).hexdigest() != expected_hash:
+        if hashlib.sha256(attempt.encode()).hexdigest() not in hashes:
             return False
         self._unlocked_until[chat_id] = time.monotonic() + self._session_timeout_seconds
         return True
@@ -143,14 +143,18 @@ class PasswordGate:
         self._unlocked_until.pop(chat_id, None)
         return was_unlocked
 
-    def _load_hash(self) -> Optional[str]:
+    def _load_hashes(self) -> set:
+        """Every non-comment, non-empty line is a valid password hash — any
+        of them unlocks a session, so multiple people/devices can each have
+        their own password."""
         if not self._hash_file.exists():
-            return None
+            return set()
+        hashes = set()
         for line in self._hash_file.read_text().splitlines():
             line = line.strip()
             if line and not line.startswith("#"):
-                return line.lower()
-        return None
+                hashes.add(line.lower())
+        return hashes
 
 
 class ClaudeSessionStore:
