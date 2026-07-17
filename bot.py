@@ -796,13 +796,9 @@ class NewsBot:
         self._warn_about_missing_config()
         self._build_application().run_polling()
 
-    def _build_help_text(self) -> str:
-        minutes = self._config.session_timeout_seconds // 60
+    @staticmethod
+    def _build_command_list() -> str:
         return (
-            "Every command needs an unlocked session — send the password as a plain "
-            f"message first (lasts {minutes} minutes). Interests and preferred bus "
-            "stops belong to whichever account your password unlocked.\n\n"
-            "Commands:\n"
             "/news <subject> — news digest on a subject, biased toward your interests\n"
             "/addinterests <topic> — add an interest (word, sentence, or paragraph)\n"
             "/getinterests — list your interests with their index\n"
@@ -814,6 +810,24 @@ class NewsBot:
             "/endsession — end the current session now\n"
             "/new — start a fresh conversation\n"
             "/help — show this message"
+        )
+
+    def _build_help_text(self) -> str:
+        minutes = self._config.session_timeout_seconds // 60
+        return (
+            "Every command needs an unlocked session — send the password as a plain "
+            f"message first (lasts {minutes} minutes). Interests and preferred bus "
+            "stops belong to whichever account your password unlocked.\n\n"
+            "Commands:\n" + self._build_command_list()
+        )
+
+    def _build_welcome_text(self, name: str) -> str:
+        minutes = self._config.session_timeout_seconds // 60
+        return (
+            f"👋 Welcome, {name}! Session active for {minutes} minutes.\n\n"
+            "Commands:\n" + self._build_command_list() + "\n\n"
+            "Anything I don't recognize — an unknown command, or any plain message — "
+            "gets you a random animal fact instead of an error, just for fun."
         )
 
     def _build_application(self) -> Application:
@@ -1216,7 +1230,9 @@ class NewsBot:
     async def handle_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._require_session(update) is None:
             return
-        await update.message.reply_text("Unknown command.")
+        # Unrecognized commands get trivia rather than an error, same as a
+        # wrong password — see handle_plain_text.
+        await update.message.reply_text(self._trivia.next_fact())
 
     async def handle_plain_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Non-command text is always treated as a password attempt, never
@@ -1232,10 +1248,8 @@ class NewsBot:
                 await context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
             except Exception:
                 logger.exception("Failed to delete password message")
-            minutes = self._config.session_timeout_seconds // 60
-            await context.bot.send_message(
-                chat_id=chat_id, text=f"Unlocked. Session active for {minutes} minutes."
-            )
+            name = update.effective_user.full_name or "there"
+            await context.bot.send_message(chat_id=chat_id, text=self._build_welcome_text(name))
             return
 
         # Wrong password (or none configured yet) — no hint that this was an
