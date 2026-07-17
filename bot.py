@@ -744,12 +744,19 @@ class LtaBusClient:
 
     async def get_arrivals(self, bus_stop_code: str) -> list:
         """Returns services sorted by number, each as
-        {"service_no": "21", "arrivals": ["2 min", "Arr", "15 min"]}."""
+        {"service_no": "21", "arrivals": ["2 min", "Arr", "15 min"]}. Callers
+        are expected to check is_configured first (as _format_arrivals
+        does); this just turns a misuse into a clear error instead of
+        silently sending a broken AccountKey header."""
+        api_key = self._api_key
+        if api_key is None:
+            raise RuntimeError("LTA_API_KEY is not configured")
+
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 f"{self.BASE_URL}/v3/BusArrival",
                 params={"BusStopCode": bus_stop_code},
-                headers={"AccountKey": self._api_key, "accept": "application/json"},
+                headers={"AccountKey": api_key, "accept": "application/json"},
             )
             resp.raise_for_status()
             data = resp.json()

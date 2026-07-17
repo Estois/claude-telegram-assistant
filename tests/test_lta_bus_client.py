@@ -4,6 +4,14 @@ from datetime import datetime, timedelta, timezone
 import bot
 
 
+class LtaBusClientGetArrivalsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_raises_when_api_key_is_not_configured(self):
+        client = bot.LtaBusClient(api_key=None)
+
+        with self.assertRaises(RuntimeError):
+            await client.get_arrivals("46009")
+
+
 class LtaBusClientFormatEtaTests(unittest.TestCase):
     def test_missing_eta_renders_as_dash(self):
         self.assertEqual(bot.LtaBusClient._format_eta(None), "—")
