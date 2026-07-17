@@ -106,7 +106,7 @@ admin account's password from a *different* Telegram account isn't enough
 on its own, and being an allowed Telegram user with a different account's
 password isn't enough either — both checks have to pass.
 
-The admin gets three extra commands, usable only from an unlocked admin
+The admin gets four extra commands, usable only from an unlocked admin
 session:
 
 | Command | Does |
@@ -114,10 +114,11 @@ session:
 | `/adduser <name> <sha256hash>` | Creates account `<name>` with that password hash, or adds the hash to `<name>` if it already exists |
 | `/removeuser <name>` | Deletes `<name>`'s entry (header + all its hashes) from `accounts.hash`. Refuses to remove the admin account itself |
 | `/adduserteleid <telegram_user_id>` | Adds a Telegram user id to the allowlist — takes effect immediately, no restart needed, and is also written back to `TELEGRAM_ALLOWED_USER_IDS` in `.env` so it survives one |
+| `/getusers` | Lists every account in `accounts.hash` and whether it currently has an active (unlocked, not-yet-expired) session |
 
 `/adduser` takes a ready-made hash, not a plaintext password — hash it
 first the same way as any other password: `printf '%s' 'theirpassword' |
-sha256sum`. A non-admin who sends any of these three commands gets the
+sha256sum`. A non-admin who sends any of these four commands gets the
 same animal-fact reply as an unrecognized command; there's no hint that
 admin-only commands exist at all.
 

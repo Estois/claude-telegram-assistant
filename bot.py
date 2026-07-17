@@ -161,6 +161,16 @@ class AccountStore:
             return None
         return self._sessions[chat_id][0]
 
+    def has_active_session(self, account_id: str) -> bool:
+        """Whether any chat is currently unlocked as this account (a chat
+        can lock/unlock a different account than one it used before, and
+        the same account can be unlocked from several chats at once)."""
+        now = time.monotonic()
+        return any(
+            unlocked_account_id == account_id and expiry > now
+            for unlocked_account_id, expiry in self._sessions.values()
+        )
+
     def try_unlock(self, chat_id: int, attempt: str) -> Optional[str]:
         """Returns the account id the attempt unlocked, or None if it
         matched no account's hash."""
@@ -964,6 +974,11 @@ class NewsBot:
                 "allow a Telegram user id to message the bot", self.handle_add_user_tele_id,
                 admin_only=True,
             ),
+            CommandSpec(
+                "getusers", "/getusers",
+                "list accounts and whether each has an active session", self.handle_get_users,
+                admin_only=True,
+            ),
         ]
 
     def _build_command_list(self, admin: bool = False) -> str:
@@ -1337,6 +1352,21 @@ class NewsBot:
         added = self._allowlist.add(user_id)
         await update.message.reply_text(
             f"Added {user_id} to the allowlist." if added else f"{user_id} is already allowed."
+        )
+
+    async def handle_get_users(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if await self._require_admin(update) is None:
+            return
+
+        await update.message.reply_text(self._format_user_listing())
+
+    def _format_user_listing(self) -> str:
+        account_ids = self._accounts.list_ids()
+        if not account_ids:
+            return "No accounts configured."
+        return "\n".join(
+            f"{account_id} — {'🟢 active' if self._accounts.has_active_session(account_id) else '🔒 locked'}"
+            for account_id in account_ids
         )
 
     async def handle_bus(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

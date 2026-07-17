@@ -16,6 +16,55 @@ class BotTestCase(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp_path, ignore_errors=True)
 
 
+class AsyncBotTestCase(unittest.IsolatedAsyncioTestCase):
+    """Like BotTestCase, but for tests that need to await NewsBot's async
+    handler methods."""
+
+    def setUp(self):
+        self.tmp_path = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp_path, ignore_errors=True)
+
+
+class FakeUser:
+    def __init__(self, id):
+        self.id = id
+
+
+class FakeChat:
+    def __init__(self, id):
+        self.id = id
+
+
+class FakeMessage:
+    """Stand-in for telegram.Message: records reply_text calls instead of
+    hitting the real Telegram API."""
+
+    def __init__(self):
+        self.replies: list = []
+
+    async def reply_text(self, text, **kwargs):
+        self.replies.append(text)
+
+
+class FakeUpdate:
+    """Minimal stand-in for telegram.Update, covering what NewsBot's
+    handlers actually touch: effective_user/effective_chat for
+    authorization and account lookup, message/effective_message for
+    replies (effective_message is used so this also works for the
+    callback-query handlers, where .message is None on a real Update)."""
+
+    def __init__(self, user_id: int, chat_id: int):
+        self.effective_user = FakeUser(user_id)
+        self.effective_chat = FakeChat(chat_id)
+        self.message = FakeMessage()
+        self.effective_message = self.message
+
+
+class FakeContext:
+    def __init__(self, args=None):
+        self.args = args or []
+
+
 def make_config(tmp_path: Path, **overrides) -> "bot.Config":
     """Builds a Config with every file/dir rooted under tmp_path, so tests
     that need a full NewsBot instance never touch real repo data. Pass
