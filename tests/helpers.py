@@ -60,9 +60,23 @@ class FakeUpdate:
         self.effective_message = self.message
 
 
+class FakeBot:
+    """Stand-in for the telegram.Bot handed to handlers as context.bot."""
+
+    async def send_chat_action(self, chat_id, action):
+        pass
+
+    async def send_message(self, chat_id, text, **kwargs):
+        pass
+
+    async def delete_message(self, chat_id, message_id):
+        pass
+
+
 class FakeContext:
     def __init__(self, args=None):
         self.args = args or []
+        self.bot = FakeBot()
 
 
 def make_config(tmp_path: Path, **overrides) -> "bot.Config":

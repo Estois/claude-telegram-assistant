@@ -884,6 +884,9 @@ class NewsBot:
     INTERESTS_FILENAME = "interests.md"
     BUS_LOCATIONS_FILENAME = "bus_locations.json"
 
+    USAGE_LIMIT_PATTERN = re.compile(r"usage limit", re.IGNORECASE)
+    USAGE_LIMIT_RESET_PATTERN = re.compile(r"reset[s]?\s+(?:at|on|in)?\s*([^.\n]+)", re.IGNORECASE)
+
     def __init__(self, config: Config):
         self._config = config
         self._accounts = AccountStore(config.accounts_file, config.session_timeout_seconds)
@@ -1545,6 +1548,35 @@ class NewsBot:
 
     # -- Claude dispatch ----------------------------------------------------
 
+    @classmethod
+    def _usage_limit_reset_notice(cls, text: str) -> Optional[str]:
+        """If text (an error message, or Claude's own reply — e.g. explaining
+        it couldn't finish a web search/scrape because it hit its usage
+        limit mid-task) mentions a usage limit, returns a short "resets
+        <when>" fragment pulled from Claude's own wording, so we never have
+        to hardcode a reset schedule or timezone ourselves. Falls back to
+        "soon" if a limit is mentioned but no reset time could be parsed out
+        of it. Returns None if text doesn't look like a usage-limit message
+        at all."""
+        if not cls.USAGE_LIMIT_PATTERN.search(text):
+            return None
+        match = cls.USAGE_LIMIT_RESET_PATTERN.search(text)
+        return match.group(1).strip() if match else "soon"
+
+    @staticmethod
+    def _build_usage_limit_message(reset_notice: str) -> str:
+        return (
+            f"⏳ Claude's usage limit has been reached — it resets {reset_notice}. "
+            "Please try again after that."
+        )
+
+    async def _reply_to_claude_failure(self, update: Update, exc: Exception) -> None:
+        reset_notice = self._usage_limit_reset_notice(str(exc))
+        if reset_notice is not None:
+            await update.message.reply_text(self._build_usage_limit_message(reset_notice))
+        else:
+            await update.message.reply_text(f"Something went wrong: {exc}")
+
     async def _run_claude(
         self,
         update: Update,
@@ -1556,8 +1588,11 @@ class NewsBot:
         """Runs prompt through Claude and returns the raw reply. Uses the
         Telegram chat's own Claude session by default; pass chat_id to
         target a different one (e.g. an account's maintenance session).
-        Returns None if a busy/error message was already sent to the user
-        and the caller should stop."""
+        Returns None if a busy/usage-limit/error message was already sent to
+        the user and the caller should stop — including when Claude's own
+        reply text (not just a hard failure) says it hit its usage limit,
+        e.g. mid-way through a news search; the caller never sees that raw
+        wording, just the generic reset notice."""
         telegram_chat_id = update.effective_chat.id
         claude_chat_id = chat_id if chat_id is not None else telegram_chat_id
 
@@ -1569,13 +1604,19 @@ class NewsBot:
         async with lock:
             keep_typing = asyncio.create_task(self._keep_typing(context, telegram_chat_id))
             try:
-                return await self._claude.run(claude_chat_id, prompt)
+                reply = await self._claude.run(claude_chat_id, prompt)
             except Exception as exc:
                 logger.exception("claude invocation failed")
-                await update.message.reply_text(f"Something went wrong: {exc}")
+                await self._reply_to_claude_failure(update, exc)
                 return None
             finally:
                 keep_typing.cancel()
+
+        reset_notice = self._usage_limit_reset_notice(reply)
+        if reset_notice is not None:
+            await update.message.reply_text(self._build_usage_limit_message(reset_notice))
+            return None
+        return reply
 
     async def _send_formatted(self, update: Update, text: str) -> None:
         """Sends Claude's reply, chunked for Telegram's message limit. Tries
