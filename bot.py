@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 # Third-party
 import httpx
@@ -851,6 +851,23 @@ class BusLocationsStore:
         self._path.write_text(json.dumps(locations, indent=2))
 
 
+@dataclass(frozen=True)
+class CommandSpec:
+    """One registered command: what it's called, how it's registered with
+    Telegram, and how it's described in /help and the post-unlock welcome
+    message — a single source of truth so a new command shows up in both
+    places just by being added to NewsBot._build_command_specs, with
+    nothing to keep in sync by hand. admin_only commands are registered
+    like any other (the handler itself enforces the admin check) but are
+    only listed for an admin session."""
+
+    name: str
+    usage: str
+    description: str
+    handler: Callable
+    admin_only: bool = False
+
+
 class NewsBot:
     """Wires the Telegram handlers together with the services above."""
 
@@ -866,7 +883,7 @@ class NewsBot:
         self._trivia = TriviaBook(config.trivia_cache_file, config.trivia_state_file, FALLBACK_TRIVIA)
         self._lta = LtaBusClient(config.lta_api_key)
         self._bus_stops = BusStopsCache(config.bus_stops_cache_file)
-        self._help_text = self._build_help_text()
+        self._command_specs = self._build_command_specs()
         self._reorganize_task: Optional[asyncio.Task] = None
 
     def _account_dir(self, account_id: str) -> Path:
@@ -891,36 +908,91 @@ class NewsBot:
         self._warn_about_missing_config()
         self._build_application().run_polling()
 
-    @staticmethod
-    def _build_command_list() -> str:
-        return (
-            "/news <subject> — news digest on a subject, biased toward your interests\n"
-            "/addinterests <topic> — add an interest (word, sentence, or paragraph)\n"
-            "/getinterests — list your interests with their index\n"
-            "/updateinterests <index> <topic> — revise or rewrite an interest "
-            "(Claude decides which)\n"
-            "/compileinterests — merge duplicate interests and add retrieval detail now "
-            "(runs automatically too)\n"
-            "/bus — bus arrival times, from a preset stop or your live location\n"
-            "/endsession — end the current session now\n"
-            "/new — start a fresh conversation\n"
-            "/help — show this message"
-        )
+    def _build_command_specs(self) -> list:
+        """Single source of truth for every user-facing command: what
+        registers it with Telegram (_build_application) and what describes
+        it in /help and the post-unlock welcome message
+        (_build_command_list) both read from this same list, so a new
+        command only needs to be added here once."""
+        return [
+            CommandSpec(
+                "news", "/news <subject>",
+                "news digest on a subject, biased toward your interests", self.handle_news,
+            ),
+            CommandSpec(
+                "addinterests", "/addinterests <topic>",
+                "add an interest (word, sentence, or paragraph)", self.handle_add_interests,
+            ),
+            CommandSpec(
+                "getinterests", "/getinterests",
+                "list your interests with their index", self.handle_get_interests,
+            ),
+            CommandSpec(
+                "updateinterests", "/updateinterests <index> <topic>",
+                "revise or rewrite an interest (Claude decides which)", self.handle_update_interests,
+            ),
+            CommandSpec(
+                "compileinterests", "/compileinterests",
+                "merge duplicate interests and add retrieval detail now (runs automatically too)",
+                self.handle_compile_interests,
+            ),
+            CommandSpec(
+                "bus", "/bus",
+                "bus arrival times, from a preset stop or your live location", self.handle_bus,
+            ),
+            CommandSpec(
+                "endsession", "/endsession",
+                "end the current session now", self.handle_end_session,
+            ),
+            CommandSpec("new", "/new", "start a fresh conversation", self.handle_new),
+            CommandSpec("help", "/help", "show this message", self.handle_help),
+            CommandSpec(
+                "adduser", "/adduser <name> <sha256hash>",
+                "create an account, or add a password to an existing one", self.handle_add_user,
+                admin_only=True,
+            ),
+            CommandSpec(
+                "removeuser", "/removeuser <name>",
+                "delete an account's password(s) from accounts.hash", self.handle_remove_user,
+                admin_only=True,
+            ),
+            CommandSpec(
+                "adduserteleid", "/adduserteleid <telegram_user_id>",
+                "allow a Telegram user id to message the bot", self.handle_add_user_tele_id,
+                admin_only=True,
+            ),
+        ]
 
-    def _build_help_text(self) -> str:
+    def _build_command_list(self, admin: bool = False) -> str:
+        lines = [
+            f"{spec.usage} — {spec.description}"
+            for spec in self._command_specs
+            if not spec.admin_only
+        ]
+        if admin:
+            admin_lines = [
+                f"{spec.usage} — {spec.description}"
+                for spec in self._command_specs
+                if spec.admin_only
+            ]
+            if admin_lines:
+                lines += ["", "Admin commands:"] + admin_lines
+        return "\n".join(lines)
+
+    def _build_help_text(self, admin: bool = False) -> str:
         minutes = self._config.session_timeout_seconds // 60
         return (
             "Every command needs an unlocked session — send the password as a plain "
             f"message first (lasts {minutes} minutes). Interests and preferred bus "
             "stops belong to whichever account your password unlocked.\n\n"
-            "Commands:\n" + self._build_command_list()
+            "Commands:\n" + self._build_command_list(admin)
         )
 
-    def _build_welcome_text(self, name: str) -> str:
+    def _build_welcome_text(self, name: str, admin: bool = False) -> str:
         minutes = self._config.session_timeout_seconds // 60
         return (
             f"👋 Welcome, {name}! Session active for {minutes} minutes.\n\n"
-            "Commands:\n" + self._build_command_list() + "\n\n"
+            "Commands:\n" + self._build_command_list(admin) + "\n\n"
             "Anything I don't recognize — an unknown command, or any plain message — "
             "gets you a random animal fact instead of an error, just for fun."
         )
@@ -933,19 +1005,12 @@ class NewsBot:
             .post_shutdown(self._on_shutdown)
             .build()
         )
+        # /start isn't in _command_specs — it's just a generic greeting, not
+        # a documented capability, so it stays out of /help and the welcome
+        # message's command list.
         app.add_handler(CommandHandler("start", self.handle_start))
-        app.add_handler(CommandHandler("help", self.handle_help))
-        app.add_handler(CommandHandler("new", self.handle_new))
-        app.add_handler(CommandHandler("endsession", self.handle_end_session))
-        app.add_handler(CommandHandler("news", self.handle_news))
-        app.add_handler(CommandHandler("addinterests", self.handle_add_interests))
-        app.add_handler(CommandHandler("getinterests", self.handle_get_interests))
-        app.add_handler(CommandHandler("updateinterests", self.handle_update_interests))
-        app.add_handler(CommandHandler("compileinterests", self.handle_compile_interests))
-        app.add_handler(CommandHandler("adduser", self.handle_add_user))
-        app.add_handler(CommandHandler("removeuser", self.handle_remove_user))
-        app.add_handler(CommandHandler("adduserteleid", self.handle_add_user_tele_id))
-        app.add_handler(CommandHandler("bus", self.handle_bus))
+        for spec in self._command_specs:
+            app.add_handler(CommandHandler(spec.name, spec.handler))
         app.add_handler(CallbackQueryHandler(self.handle_bus_callback, pattern=r"^bus_stop:"))
         app.add_handler(CallbackQueryHandler(self.handle_bus_fav_add, pattern=r"^bus_fav_add:"))
         app.add_handler(CallbackQueryHandler(self.handle_bus_fav_remove, pattern=r"^bus_fav_remove:"))
@@ -1078,9 +1143,10 @@ class NewsBot:
         await update.message.reply_text("Hi!")
 
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._require_session(update) is None:
+        account_id = await self._require_session(update)
+        if account_id is None:
             return
-        await update.message.reply_text(self._help_text)
+        await update.message.reply_text(self._build_help_text(self._is_admin(update, account_id)))
 
     async def handle_new(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._require_session(update) is None:
@@ -1425,13 +1491,15 @@ class NewsBot:
         chat_id = update.effective_chat.id
         attempt = (update.message.text or "").strip()
 
-        if self._accounts.try_unlock(chat_id, attempt) is not None:
+        account_id = self._accounts.try_unlock(chat_id, attempt)
+        if account_id is not None:
             try:
                 await context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
             except Exception:
                 logger.exception("Failed to delete password message")
             name = update.effective_user.full_name or "there"
-            await context.bot.send_message(chat_id=chat_id, text=self._build_welcome_text(name))
+            admin = self._is_admin(update, account_id)
+            await context.bot.send_message(chat_id=chat_id, text=self._build_welcome_text(name, admin))
             return
 
         # Wrong password (or none configured yet) — no hint that this was an

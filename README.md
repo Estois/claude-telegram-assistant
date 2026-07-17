@@ -120,6 +120,13 @@ sha256sum`. A non-admin who sends any of these three commands gets the
 same animal-fact reply as an unrecognized command; there's no hint that
 admin-only commands exist at all.
 
+Every command's name, usage, and description live in one place in `bot.py`
+(`NewsBot._build_command_specs`), which is what both registers it with
+Telegram and renders it in `/help` and the post-unlock welcome message —
+a new command only needs to be added there once to show up everywhere.
+Admin commands only render in `/help`/the welcome message for an admin
+session; everyone else's command list is unaffected by their existence.
+
 ### Trivia source
 
 Wrong-password replies pull from a local cache (`trivia_cache.json`) of
