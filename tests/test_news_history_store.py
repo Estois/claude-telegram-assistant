@@ -31,6 +31,18 @@ class NewsHistoryStoreTests(BotTestCase):
         recent = store.recent(window_days=60, max_entries=2)
         self.assertEqual([r["subject"] for r in recent], ["topic 3", "topic 4"])
 
+    def test_recent_treats_nonpositive_max_entries_as_unbounded(self):
+        store = self._store()
+        for i in range(5):
+            store.append(f"topic {i}")
+        for max_entries in (0, -1):
+            recent = store.recent(window_days=60, max_entries=max_entries)
+            self.assertEqual(
+                [r["subject"] for r in recent],
+                [f"topic {i}" for i in range(5)],
+                msg=f"max_entries={max_entries} should return all in-window records",
+            )
+
     def test_theme_counts_aggregates_case_insensitively_most_frequent_first(self):
         store = self._store()
         for subject in ["Games", "games", "GAMES", "anime"]:
@@ -45,6 +57,17 @@ class NewsHistoryStoreTests(BotTestCase):
         path.write_text('not json\n{"ts": 0}\n' + json.dumps({"ts": time.time(), "subject": "ok"}) + "\n")
         recent = self._store().recent(window_days=60, max_entries=100)
         self.assertEqual([r["subject"] for r in recent], ["ok"])
+
+    def test_structurally_invalid_records_are_logged_when_dropped(self):
+        path = self.tmp_path / "news_history.jsonl"
+        # Valid JSON, but not a usable record: missing "subject", and a non-dict.
+        path.write_text('{"ts": 0}\n123\n' + json.dumps({"ts": time.time(), "subject": "ok"}) + "\n")
+        with self.assertLogs("ykbot", level="WARNING") as captured:
+            recent = self._store().recent(window_days=60, max_entries=100)
+        self.assertEqual([r["subject"] for r in recent], ["ok"])
+        # One log line per dropped structurally-invalid record.
+        dropped = [m for m in captured.output if "invalid" in m.lower()]
+        self.assertEqual(len(dropped), 2)
 
     def test_prune_rewrites_file_to_window(self):
         path = self.tmp_path / "news_history.jsonl"

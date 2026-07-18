@@ -26,7 +26,10 @@ class NewsHistoryStore:
 
     def recent(self, window_days: int, max_entries: int) -> list:
         """Records newer than window_days, capped to the most recent
-        max_entries (records are stored in append/chronological order)."""
+        max_entries (records are stored in append/chronological order).
+
+        A max_entries of 0 or less means no cap — every in-window record is
+        returned."""
         cutoff = time.time() - window_days * 86400
         within = [r for r in self._read() if r.get("ts", 0) >= cutoff]
         return within[-max_entries:] if max_entries > 0 else within
@@ -61,4 +64,10 @@ class NewsHistoryStore:
                 continue
             if isinstance(record, dict) and "subject" in record and "ts" in record:
                 records.append(record)
+            else:
+                logger.warning(
+                    "Skipping structurally-invalid record in %s: %r",
+                    self._path,
+                    record,
+                )
         return records
