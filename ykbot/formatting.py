@@ -43,7 +43,7 @@ class CommandSpec:
     """One registered command: what it's called, how it's registered with
     Telegram, and how it's described in /help and the post-unlock welcome
     message — a single source of truth so a new command shows up in both
-    places just by being added to NewsBot._build_command_specs, with
+    places just by being added to YKBot._build_command_specs, with
     nothing to keep in sync by hand. admin_only commands are registered
     like any other (the handler itself enforces the admin check) but are
     only listed for an admin session."""

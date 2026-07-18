@@ -5,19 +5,25 @@ module stays the process entry point (``python bot.py``) and the import target
 for the test suite (``import bot``); every public name is re-exported below.
 """
 
-from ykbot._logging import logger
-from ykbot.accounts import AccountStore, AllowlistStore
-from ykbot.app import YKBot, main
-from ykbot.bus import BusLocationsStore, BusStopsCache, LtaBusClient
-from ykbot.claude import ClaudeClient, ClaudeSessionStore
-from ykbot.config import Config
-from ykbot.formatting import CommandSpec, TelegramFormatter
-from ykbot.interests import InterestsStore
-from ykbot.trivia import FALLBACK_TRIVIA, AnimalEmoji, TriviaBook
-
-# Backwards-compatible alias: some tests still import bot.NewsBot until they
-# are renamed to YKBot. Dropped once they are.
-NewsBot = YKBot
+from ykbot import (
+    AccountStore,
+    AllowlistStore,
+    AnimalEmoji,
+    BusLocationsStore,
+    BusStopsCache,
+    ClaudeClient,
+    ClaudeSessionStore,
+    CommandSpec,
+    Config,
+    FALLBACK_TRIVIA,
+    InterestsStore,
+    LtaBusClient,
+    TelegramFormatter,
+    TriviaBook,
+    YKBot,
+    logger,
+    main,
+)
 
 __all__ = [
     "Config",
@@ -35,7 +41,6 @@ __all__ = [
     "BusLocationsStore",
     "CommandSpec",
     "YKBot",
-    "NewsBot",
     "main",
     "logger",
 ]
