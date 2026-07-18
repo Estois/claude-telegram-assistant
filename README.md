@@ -226,7 +226,14 @@ usually come in direction-opposite pairs across a road, so picking from a
 short list beats guessing from the single nearest one. Tapping any stop
 button (preset or nearby) fetches and displays live arrivals for it.
 
-The arrivals screen itself has a second button: "⭐ Add as preferred" for a
+The arrivals screen has three buttons. A top row of "🔄 Refresh" — re-fetches
+the arrival timers for the same stop and re-renders the message (a "🔄 Updated
+HH:MM:SS" footer confirms the refresh and keeps Telegram from rejecting an
+unchanged edit) — and "⬅️ Back", which returns to whichever menu you came
+from: your preset stops (from `/bus`) or the nearby stops (from a shared
+location). The menu you came from is remembered per user in memory only, so
+after a bot restart, Back on an old message falls back to the preset menu with
+a "Menu expired —" note. Below that, a "⭐ Add as preferred" button for a
 stop not already in the current account's `bus_locations.json`, or "🗑
 Remove from preferred" for one that is — tapping it edits that account's
 file directly and flips the button, so you can toggle a stop in or out

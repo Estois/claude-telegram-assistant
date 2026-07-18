@@ -7,6 +7,7 @@ This is the one stateful class; every ``self._x`` it touches is set up in
 import asyncio
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
 
@@ -207,6 +208,8 @@ class YKBot:
         for spec in self._command_specs:
             app.add_handler(CommandHandler(spec.name, spec.handler))
         app.add_handler(CallbackQueryHandler(self.handle_bus_callback, pattern=r"^bus_stop:"))
+        app.add_handler(CallbackQueryHandler(self.handle_bus_refresh, pattern=r"^bus_refresh:"))
+        app.add_handler(CallbackQueryHandler(self.handle_bus_back, pattern=r"^bus_back$"))
         app.add_handler(CallbackQueryHandler(self.handle_bus_fav_add, pattern=r"^bus_fav_add:"))
         app.add_handler(CallbackQueryHandler(self.handle_bus_fav_remove, pattern=r"^bus_fav_remove:"))
         app.add_handler(
@@ -594,6 +597,11 @@ class YKBot:
         if account_id is None:
             return
 
+        context.user_data["bus_menu"] = {"kind": "fav"}
+        text, markup = self._build_fav_menu(account_id)
+        await update.message.reply_text(text, reply_markup=markup)
+
+    def _build_fav_menu(self, account_id: str) -> "tuple[str, InlineKeyboardMarkup]":
         locations = self._bus_locations_for(account_id).list()
         buttons = [
             [InlineKeyboardButton(name, callback_data=f"bus_stop:{code}")]
@@ -602,7 +610,19 @@ class YKBot:
         buttons.append(
             [InlineKeyboardButton("📍 Send my location", callback_data="bus_request_location")]
         )
-        await update.message.reply_text("Pick a stop:", reply_markup=InlineKeyboardMarkup(buttons))
+        return "Pick a stop:", InlineKeyboardMarkup(buttons)
+
+    def _build_near_menu(self, stops: list) -> "tuple[str, InlineKeyboardMarkup]":
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    f"{stop['Description']} ({int(stop['distance_m'])}m)",
+                    callback_data=f"bus_stop:{stop['BusStopCode']}",
+                )
+            ]
+            for stop in stops
+        ]
+        return "Nearest stops:", InlineKeyboardMarkup(buttons)
 
     async def handle_bus_request_location(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -627,8 +647,48 @@ class YKBot:
 
         await query.answer()
         stop_code = query.data.split(":", 1)[1]
-        text = await self._format_arrivals(stop_code)
+        text = await self._render_arrivals(stop_code)
         await query.edit_message_text(text, reply_markup=self._build_arrivals_keyboard(stop_code, account_id))
+
+    async def _render_arrivals(self, stop_code: str, prefix: str = "") -> str:
+        """Arrival times for a stop, plus a refresh timestamp footer. The
+        footer both confirms a refresh happened and keeps the message text
+        changing, so Telegram never rejects the edit as 'not modified'."""
+        text = await self._format_arrivals(stop_code)
+        stamp = datetime.now().strftime("%H:%M:%S")
+        return f"{prefix}{text}\n\n🔄 Updated {stamp}"
+
+    async def handle_bus_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+
+        await query.answer("Refreshed")
+        stop_code = query.data.split(":", 1)[1]
+        text = await self._render_arrivals(stop_code)
+        await query.edit_message_text(text, reply_markup=self._build_arrivals_keyboard(stop_code, account_id))
+
+    async def handle_bus_back(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+
+        await query.answer()
+        menu = context.user_data.get("bus_menu")
+        if menu and menu.get("kind") == "near" and menu.get("stops"):
+            text, markup = self._build_near_menu(menu["stops"])
+        elif menu and menu.get("kind") == "fav":
+            text, markup = self._build_fav_menu(account_id)
+        else:
+            # Navigation state was lost (e.g. the bot restarted since the menu
+            # was shown) — fall back to the always-available preferred menu.
+            text, markup = self._build_fav_menu(account_id)
+            text = f"Menu expired — {text[0].lower()}{text[1:]}"
+        await query.edit_message_text(text, reply_markup=markup)
 
     async def handle_bus_fav_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -642,9 +702,9 @@ class YKBot:
         name = self._describe_stop(stop_code)
         self._bus_locations_for(account_id).add(name, stop_code)
 
-        text = await self._format_arrivals(stop_code)
+        text = await self._render_arrivals(stop_code, prefix=f'⭐ Added "{name}" to preferred stops.\n\n')
         await query.edit_message_text(
-            f'⭐ Added "{name}" to preferred stops.\n\n{text}',
+            text,
             reply_markup=self._build_arrivals_keyboard(stop_code, account_id),
         )
 
@@ -659,9 +719,9 @@ class YKBot:
         stop_code = query.data.split(":", 1)[1]
         self._bus_locations_for(account_id).remove_by_code(stop_code)
 
-        text = await self._format_arrivals(stop_code)
+        text = await self._render_arrivals(stop_code, prefix="🗑 Removed from preferred stops.\n\n")
         await query.edit_message_text(
-            f"🗑 Removed from preferred stops.\n\n{text}",
+            text,
             reply_markup=self._build_arrivals_keyboard(stop_code, account_id),
         )
 
@@ -680,7 +740,11 @@ class YKBot:
             fav_button = InlineKeyboardButton(
                 "⭐ Add as preferred", callback_data=f"bus_fav_add:{stop_code}"
             )
-        return InlineKeyboardMarkup([[fav_button]])
+        nav_row = [
+            InlineKeyboardButton("🔄 Refresh", callback_data=f"bus_refresh:{stop_code}"),
+            InlineKeyboardButton("⬅️ Back", callback_data="bus_back"),
+        ]
+        return InlineKeyboardMarkup([nav_row, [fav_button]])
 
     async def handle_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._require_session(update) is None:
@@ -699,16 +763,9 @@ class YKBot:
             await update.message.reply_text("No bus stops found nearby.")
             return
 
-        buttons = [
-            [
-                InlineKeyboardButton(
-                    f"{stop['Description']} ({int(stop['distance_m'])}m)",
-                    callback_data=f"bus_stop:{stop['BusStopCode']}",
-                )
-            ]
-            for stop in nearest
-        ]
-        await update.message.reply_text("Nearest stops:", reply_markup=InlineKeyboardMarkup(buttons))
+        context.user_data["bus_menu"] = {"kind": "near", "stops": nearest}
+        text, markup = self._build_near_menu(nearest)
+        await update.message.reply_text(text, reply_markup=markup)
 
     async def _format_arrivals(self, stop_code: str) -> str:
         if not self._lta.is_configured:

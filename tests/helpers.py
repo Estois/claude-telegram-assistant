@@ -46,18 +46,51 @@ class FakeMessage:
         self.replies.append(text)
 
 
+class FakeCallbackQuery:
+    """Stand-in for telegram.CallbackQuery: records answer() and
+    edit_message_text() calls instead of hitting the real Telegram API."""
+
+    def __init__(self, data: str, message: "FakeMessage"):
+        self.data = data
+        self.message = message
+        self.answers: list = []
+        self.edits: list = []  # (text, reply_markup) tuples
+
+    async def answer(self, text=None, **kwargs):
+        self.answers.append(text)
+
+    async def edit_message_text(self, text, **kwargs):
+        self.edits.append((text, kwargs.get("reply_markup")))
+
+    @property
+    def last_text(self):
+        return self.edits[-1][0] if self.edits else None
+
+    @property
+    def last_markup(self):
+        return self.edits[-1][1] if self.edits else None
+
+
 class FakeUpdate:
     """Minimal stand-in for telegram.Update, covering what YKBot's
     handlers actually touch: effective_user/effective_chat for
     authorization and account lookup, message/effective_message for
     replies (effective_message is used so this also works for the
-    callback-query handlers, where .message is None on a real Update)."""
+    callback-query handlers, where .message is None on a real Update).
 
-    def __init__(self, user_id: int, chat_id: int):
+    Pass callback_data to also attach a FakeCallbackQuery, for testing the
+    inline-button (callback-query) handlers."""
+
+    def __init__(self, user_id: int, chat_id: int, callback_data: str = None):
         self.effective_user = FakeUser(user_id)
         self.effective_chat = FakeChat(chat_id)
         self.message = FakeMessage()
         self.effective_message = self.message
+        self.callback_query = (
+            FakeCallbackQuery(callback_data, self.message)
+            if callback_data is not None
+            else None
+        )
 
 
 class FakeBot:
@@ -74,9 +107,10 @@ class FakeBot:
 
 
 class FakeContext:
-    def __init__(self, args=None):
+    def __init__(self, args=None, user_data=None):
         self.args = args or []
         self.bot = FakeBot()
+        self.user_data = user_data if user_data is not None else {}
 
 
 def make_config(tmp_path: Path, **overrides) -> "bot.Config":
