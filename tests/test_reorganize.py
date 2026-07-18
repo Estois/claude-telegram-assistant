@@ -2,7 +2,13 @@ import asyncio
 import unittest
 
 import bot
-from tests.helpers import AsyncBotTestCase, make_config
+from tests.helpers import (
+    AsyncBotTestCase,
+    FakeContext,
+    FakeUpdate,
+    make_config,
+    write_accounts_file,
+)
 
 
 class FakeClaudeClient:
@@ -73,6 +79,35 @@ class ReorganizeAccountTests(AsyncBotTestCase):
         await news_bot._reorganize_account("amy")
 
         self.assertEqual(news_bot._interests_for("amy").list(), ["games", "cybersecurity"])
+
+
+class CompileInterestsCommandTests(AsyncBotTestCase):
+    # Regression guard for the Task 4 signature change to
+    # _build_reorganize_prompt(entries, theme_counts): handle_compile_interests
+    # (the /compileinterests command) is a second live caller that was missed
+    # when the caller update only touched _reorganize_account, and calling it
+    # with the old one-arg signature raised TypeError.
+    def _make_bot(self, **overrides):
+        news_bot = bot.YKBot(make_config(self.tmp_path, **overrides))
+        write_accounts_file(news_bot._config.accounts_file, {"alice": ["hunter2"]})
+        news_bot._accounts.try_unlock(chat_id=1, attempt="hunter2")
+        return news_bot
+
+    async def test_compile_interests_reorganizes_without_raising(self):
+        news_bot = self._make_bot()
+        interests = news_bot._interests_for("alice")
+        interests.add("games")
+        interests.add("more games")
+
+        async def fake_run_claude(update, context, prompt, chat_id=None):
+            return "1. a\n2. b"
+
+        news_bot._run_claude = fake_run_claude
+
+        update = FakeUpdate(user_id=1, chat_id=1)
+        await news_bot.handle_compile_interests(update, FakeContext(args=[]))
+
+        self.assertEqual(news_bot._interests_for("alice").list(), ["a", "b"])
 
 
 class ReorganizePromptTests(unittest.TestCase):

@@ -458,7 +458,8 @@ class YKBot:
             await update.message.reply_text("Need at least 2 interests to reorganize. See /getinterests.")
             return
 
-        prompt = self._build_reorganize_prompt(entries)
+        theme_counts = []  # TODO(Task 5): fold in recent /news history here too
+        prompt = self._build_reorganize_prompt(entries, theme_counts)
         raw_reply = await self._run_claude(
             update, context, prompt, chat_id=self._maintenance_key(account_id)
         )
