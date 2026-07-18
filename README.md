@@ -49,6 +49,33 @@ account — it shares a lock with the background job so the two never run
 concurrently and step on each other's edits. Its reply includes the full
 reorganized list, same as `/getinterests`.
 
+### Passive interest learning
+
+Each time you run `/news <subject>`, the subject is logged to your account's
+`accounts/<id>/news_history.jsonl` (gitignored as part of the `accounts/`
+directory, since it contains real data about user requests). The daily
+background job and `/compileinterests` both examine this log to detect
+recurring request themes and fold them into your interests automatically —
+a passive, hands-off way to refine your interests over time without
+manually editing them. The learning is silent: it doesn't announce what it
+found, so you'll only notice by checking `/getinterests` and seeing new or
+expanded interests. It's also additive: new learned themes never drop or
+replace your manually-added interests, only enrich the list. Run
+`/compileinterests` to see the full reorganized result immediately, or let
+the daily pass handle it passively. Note that only the daily background
+pass prunes old entries from the log according to the retention window; the
+on-demand `/compileinterests` learns from the current log without pruning.
+
+Configure the passive learning behavior with three optional environment
+variables (see Configuration below):
+
+- `NEWS_LEARNING_ENABLED` (default `true`) — set to `false` to disable
+  logging of `/news` subjects entirely.
+- `NEWS_HISTORY_WINDOW_DAYS` (default `60`) — how many days of request
+  history the daily job considers when looking for recurring themes.
+- `NEWS_HISTORY_MAX_ENTRIES` (default `100`) — maximum number of logged
+  requests to keep per account; older entries are pruned first.
+
 Unrecognized commands get a random animal-fact reply, same as a locked
 command or a wrong password attempt — never an error, and never a hint
 about what commands exist. Plain text messages are never sent to Claude
@@ -332,6 +359,9 @@ Optional environment variables (see `.env.example`):
 | `INTERESTS_REORGANIZE_INTERVAL_SECONDS` | `86400` | How often the background reorganize job runs per account; `0` disables it |
 | `BUS_STOPS_CACHE_FILE` | `bus_stops_cache.json` | Path to the nearest-stop lookup cache built by `fetch_bus_stops.py` |
 | `BUS_NEARBY_COUNT` | `3` | How many nearest stops to show as buttons when you share your location |
+| `NEWS_LEARNING_ENABLED` | `true` | Enable passive learning from `/news` requests; set to `false` to disable logging |
+| `NEWS_HISTORY_WINDOW_DAYS` | `60` | How many days of `/news` history to consider when detecting recurring themes |
+| `NEWS_HISTORY_MAX_ENTRIES` | `100` | Maximum logged `/news` requests per account; oldest entries are pruned first |
 | `ENV_FILE` | `.env` | Path `/adduserteleid` rewrites `TELEGRAM_ALLOWED_USER_IDS` in |
 | `ADMIN_ACCOUNT_ID` | `amy` | Account id allowed to use the admin commands (see Admin account) |
 | `ADMIN_TELEGRAM_USER_ID` | `100000001` | Telegram user id allowed to use the admin commands, alongside `ADMIN_ACCOUNT_ID` |
