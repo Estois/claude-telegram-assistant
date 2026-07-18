@@ -10,7 +10,6 @@ import hashlib
 import json
 import logging
 import math
-import os
 import random
 import re
 import time
@@ -51,78 +50,7 @@ FALLBACK_TRIVIA = [
 ]
 
 
-@dataclass(frozen=True)
-class Config:
-    """Runtime settings, loaded once from the environment."""
-
-    base_dir: Path
-    telegram_token: str
-    allowed_user_ids: Optional[frozenset]
-    env_file: Path
-    admin_account_id: str
-    admin_telegram_user_id: int
-    claude_bin: str
-    claude_workdir: str
-    claude_model: Optional[str]
-    claude_permission_mode: str
-    claude_timeout_seconds: int
-    accounts_dir: Path
-    interests_reorganize_interval_seconds: int
-    accounts_file: Path
-    session_timeout_seconds: int
-    sessions_file: Path
-    trivia_cache_file: Path
-    trivia_state_file: Path
-    lta_api_key: Optional[str]
-    bus_stops_cache_file: Path
-    bus_nearby_count: int
-
-    @classmethod
-    def from_env(cls) -> "Config":
-        base_dir = Path(__file__).resolve().parent
-
-        token = os.environ.get("TELEGRAM_BOT_TOKEN")
-        if not token:
-            raise RuntimeError(
-                "TELEGRAM_BOT_TOKEN is not set. Copy .env.example to .env and fill it in."
-            )
-
-        raw_ids = os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "").strip()
-        allowed_user_ids = (
-            frozenset(int(x) for x in raw_ids.split(",") if x.strip()) if raw_ids else None
-        )
-
-        return cls(
-            base_dir=base_dir,
-            telegram_token=token,
-            allowed_user_ids=allowed_user_ids,
-            env_file=Path(os.environ.get("ENV_FILE", str(base_dir / ".env"))).resolve(),
-            admin_account_id=os.environ.get("ADMIN_ACCOUNT_ID", "amy"),
-            admin_telegram_user_id=int(os.environ.get("ADMIN_TELEGRAM_USER_ID", "100000001")),
-            claude_bin=os.environ.get("CLAUDE_BIN", "claude"),
-            claude_workdir=os.environ.get("CLAUDE_WORKDIR", str(base_dir)),
-            claude_model=os.environ.get("CLAUDE_MODEL"),
-            claude_permission_mode=os.environ.get("CLAUDE_PERMISSION_MODE", "bypassPermissions"),
-            claude_timeout_seconds=int(os.environ.get("CLAUDE_TIMEOUT_SECONDS", "600")),
-            accounts_dir=Path(
-                os.environ.get("ACCOUNTS_DIR", str(base_dir / "accounts"))
-            ).resolve(),
-            interests_reorganize_interval_seconds=int(
-                os.environ.get("INTERESTS_REORGANIZE_INTERVAL_SECONDS", "86400")
-            ),
-            accounts_file=Path(
-                os.environ.get("ACCOUNTS_FILE", str(base_dir / "accounts.hash"))
-            ).resolve(),
-            session_timeout_seconds=int(os.environ.get("SESSION_TIMEOUT_SECONDS", "900")),
-            sessions_file=base_dir / "sessions.json",
-            trivia_cache_file=base_dir / "trivia_cache.json",
-            trivia_state_file=base_dir / "trivia_state.json",
-            lta_api_key=os.environ.get("LTA_API_KEY"),
-            bus_stops_cache_file=Path(
-                os.environ.get("BUS_STOPS_CACHE_FILE", str(base_dir / "bus_stops_cache.json"))
-            ).resolve(),
-            bus_nearby_count=int(os.environ.get("BUS_NEARBY_COUNT", "3")),
-        )
+from ykbot.config import Config
 
 
 class AccountStore:
