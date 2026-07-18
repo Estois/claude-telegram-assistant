@@ -1,4 +1,5 @@
 import asyncio
+import unittest
 
 import bot
 from tests.helpers import AsyncBotTestCase, make_config
@@ -74,7 +75,22 @@ class ReorganizeAccountTests(AsyncBotTestCase):
         self.assertEqual(news_bot._interests_for("amy").list(), ["games", "cybersecurity"])
 
 
-if __name__ == "__main__":
-    import unittest
+class ReorganizePromptTests(unittest.TestCase):
+    def test_no_history_block_when_theme_counts_empty(self):
+        prompt = bot.YKBot._build_reorganize_prompt(["games", "anime"], [])
+        self.assertIn("1. games", prompt)
+        self.assertNotIn("requested", prompt)
 
+    def test_history_block_lists_counts_and_recurrence_rule(self):
+        prompt = bot.YKBot._build_reorganize_prompt(
+            ["games"], [("quantum computing", 3), ("obscure onetime", 1)]
+        )
+        self.assertIn("quantum computing (requested 3x)", prompt)
+        self.assertIn("obscure onetime (requested 1x)", prompt)
+        self.assertIn("recurs", prompt)
+        self.assertIn("never add a one-off", prompt)
+        self.assertIn("Do not remove or override", prompt)
+
+
+if __name__ == "__main__":
     unittest.main()

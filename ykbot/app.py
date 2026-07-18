@@ -307,20 +307,34 @@ class YKBot:
         )
 
     @staticmethod
-    def _build_reorganize_prompt(entries: list) -> str:
+    def _build_reorganize_prompt(entries: list, theme_counts: list) -> str:
         numbered = "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, start=1))
+        history_block = ""
+        if theme_counts:
+            lines = "\n".join(
+                f"- {subject} (requested {count}x)" for subject, count in theme_counts
+            )
+            history_block = (
+                "\n\nSeparately, here are the topics I've recently asked /news to cover, "
+                f"with how many times I asked for each:\n{lines}\n\n"
+                "Fold a topic from this request history into the interests list ONLY if "
+                "it recurs (requested more than once) or is clearly significant — never "
+                "add a one-off request. Do not remove or override any interest already "
+                "in the list above."
+            )
         return (
             "Here is my current news-interests list, used to bias what /news digests "
-            f"cover:\n\n{numbered}\n\n"
-            "Reorganize this list: merge entries that are duplicates or clearly the same "
-            "underlying topic, and where it would help a news-search assistant retrieve "
-            "more relevant results, add a short blurb of extra detail to an entry — "
-            "specific sub-topics, entities, or angles reasonably implied by what's "
-            "already there. Don't invent interests the list doesn't imply, and don't "
-            "drop any distinct topic. "
-            "Reply with ONLY the resulting list, renumbered from 1, one entry per line, "
-            "in the exact form '<number>. <entry text>' — plain text, no extra "
-            "commentary, no headers, no markdown."
+            f"cover:\n\n{numbered}\n"
+            + history_block
+            + "\n\nReorganize this list: merge entries that are duplicates or clearly the "
+            "same underlying topic, and where it would help a news-search assistant "
+            "retrieve more relevant results, add a short blurb of extra detail to an "
+            "entry — specific sub-topics, entities, or angles reasonably implied by what's "
+            "already there. Don't invent interests the list doesn't imply, and don't drop "
+            "any distinct topic. "
+            "Reply with ONLY the resulting list, renumbered from 1, one entry per line, in "
+            "the exact form '<number>. <entry text>' — plain text, no extra commentary, no "
+            "headers, no markdown."
         )
 
     # -- Command handlers -------------------------------------------------
@@ -848,7 +862,8 @@ class YKBot:
             if len(entries) < 2:
                 return  # nothing meaningful to merge or expand
 
-            prompt = self._build_reorganize_prompt(entries)
+            theme_counts = []  # TODO(Task 5): wire real /news request history
+            prompt = self._build_reorganize_prompt(entries, theme_counts)
             raw_reply = await self._claude.run(maintenance_key, prompt)
             new_entries = InterestsStore.parse_entries(raw_reply)
             if not new_entries:
