@@ -487,14 +487,17 @@ git commit -m "Extend reorganize prompt to fold in recurring /news themes"
 
 ---
 
-### Task 5: Wire history into the daily pass
+### Task 5: Wire history into the daily pass AND /compileinterests
 
 **Files:**
-- Modify: `ykbot/app.py` (`_reorganize_account`)
+- Modify: `ykbot/app.py` (new `_recent_theme_counts` helper; `_reorganize_account`; `handle_compile_interests`)
 - Test: `tests/test_reorganize.py` (add wiring tests)
 
 **Interfaces:**
+- Produces: `YKBot._recent_theme_counts(account_id: str) -> list` — recent theme counts for the account, or `[]` when learning is disabled.
 - Consumes: `_news_history_for`, `Config.news_history_window_days/max_entries/news_learning_enabled`, `_build_reorganize_prompt(entries, theme_counts)`.
+- Both `_reorganize_account` (daily job) and `handle_compile_interests` (`/compileinterests`) fold in history via the shared helper, so the manual and automatic reorganize behave identically (`/compileinterests`'s docstring calls itself "the same reorganization the background job runs"). Only the daily job prunes the log.
+- NOTE: ensure `tests/test_reorganize.py` imports `FakeUpdate`, `FakeContext`, and `write_accounts_file` from `tests.helpers` (the Task 4 fix added a `CompileInterestsCommandTests` that may already have added these — add any that are missing).
 
 - [ ] **Step 1: Write the failing tests** — append to `tests/test_reorganize.py`:
 
@@ -557,6 +560,50 @@ class ReorganizeLearningTests(AsyncBotTestCase):
         news_bot._claude = fake
         await news_bot._reorganize_account("amy")
         self.assertEqual(fake.calls, [])  # <2 interests and history ignored -> skip
+
+
+class CompileInterestsLearningTests(AsyncBotTestCase):
+    def _make_bot(self, **overrides):
+        news_bot = bot.YKBot(make_config(self.tmp_path, **overrides))
+        write_accounts_file(news_bot._config.accounts_file, {"alice": ["hunter2"]})
+        news_bot._accounts.try_unlock(chat_id=1, attempt="hunter2")
+        return news_bot
+
+    async def test_compile_folds_recurring_history_into_prompt(self):
+        news_bot = self._make_bot()
+        for _ in range(2):
+            news_bot._news_history_for("alice").append("quantum computing")
+        news_bot._interests_for("alice").add("games")
+        news_bot._interests_for("alice").add("anime")
+        captured = {}
+
+        async def fake_run_claude(update, context, prompt, chat_id=None):
+            captured["prompt"] = prompt
+            return "1. games\n2. anime\n3. quantum computing"
+
+        news_bot._run_claude = fake_run_claude
+        await news_bot.handle_compile_interests(
+            FakeUpdate(user_id=1, chat_id=1), FakeContext(args=[])
+        )
+        self.assertIn("quantum computing (requested 2x)", captured["prompt"])
+
+    async def test_compile_ignores_history_when_disabled(self):
+        news_bot = self._make_bot(news_learning_enabled=False)
+        for _ in range(2):
+            news_bot._news_history_for("alice").append("quantum computing")
+        news_bot._interests_for("alice").add("games")
+        news_bot._interests_for("alice").add("anime")
+        captured = {}
+
+        async def fake_run_claude(update, context, prompt, chat_id=None):
+            captured["prompt"] = prompt
+            return "1. games\n2. anime"
+
+        news_bot._run_claude = fake_run_claude
+        await news_bot.handle_compile_interests(
+            FakeUpdate(user_id=1, chat_id=1), FakeContext(args=[])
+        )
+        self.assertNotIn("requested", captured["prompt"])
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -564,7 +611,22 @@ class ReorganizeLearningTests(AsyncBotTestCase):
 Run: `python3 -m unittest tests.test_reorganize.ReorganizeLearningTests -v`
 Expected: FAIL (history not read; skip guard still `< 2`).
 
-- [ ] **Step 3: Rewrite `_reorganize_account`** in `ykbot/app.py`:
+- [ ] **Step 3: Add the shared `_recent_theme_counts` helper** in `ykbot/app.py` (next to `_news_history_for`):
+
+```python
+    def _recent_theme_counts(self, account_id: str) -> list:
+        """Recent /news request themes with counts for this account, or an
+        empty list when learning is disabled. Shared by the daily reorganize
+        job and the manual /compileinterests command so they behave the same."""
+        if not self._config.news_learning_enabled:
+            return []
+        return self._news_history_for(account_id).theme_counts(
+            self._config.news_history_window_days,
+            self._config.news_history_max_entries,
+        )
+```
+
+- [ ] **Step 4: Rewrite `_reorganize_account`** in `ykbot/app.py` to use the helper, widen the skip guard, and prune after (remove the temporary `theme_counts = []` placeholder left from Task 4):
 
 ```python
     async def _reorganize_account(self, account_id: str) -> None:
@@ -576,15 +638,7 @@ Expected: FAIL (history not read; skip guard still `< 2`).
         async with self._claude.lock_for(maintenance_key):
             interests = self._interests_for(account_id)
             entries = interests.list()
-
-            history = None
-            theme_counts: list = []
-            if self._config.news_learning_enabled:
-                history = self._news_history_for(account_id)
-                theme_counts = history.theme_counts(
-                    self._config.news_history_window_days,
-                    self._config.news_history_max_entries,
-                )
+            theme_counts = self._recent_theme_counts(account_id)
 
             # Nothing to do without either enough interests to reorganize or any
             # request history to learn from.
@@ -606,26 +660,33 @@ Expected: FAIL (history not read; skip guard still `< 2`).
                     account_id, len(entries), len(new_entries),
                 )
 
-            # Prune regardless of the reply so the window stays bounded.
-            if history is not None:
-                history.prune(
+            # Prune the log to the window after the daily pass (the manual
+            # /compileinterests path deliberately does not prune).
+            if self._config.news_learning_enabled:
+                self._news_history_for(account_id).prune(
                     self._config.news_history_window_days,
                     self._config.news_history_max_entries,
                 )
 ```
 
-Also remove the temporary `theme_counts = []` line added in Task 4 Step 5 (now superseded).
+- [ ] **Step 5: Wire `handle_compile_interests`** to fold in history too — replace the temporary `theme_counts = []  # TODO(Task 5)...` placeholder (added by the Task 4 fix) with the shared helper, and drop the TODO comment:
 
-- [ ] **Step 4: Run tests + gates**
+```python
+        theme_counts = self._recent_theme_counts(account_id)
+        prompt = self._build_reorganize_prompt(entries, theme_counts)
+```
+Leave the rest of `handle_compile_interests` unchanged. It does NOT prune (pruning is the daily job's responsibility).
+
+- [ ] **Step 6: Run tests + gates**
 
 Run: `python3 -m unittest tests.test_reorganize -v && python3 -m pyflakes bot.py ykbot/ && python3 -m unittest discover -s tests -t .`
-Expected: all PASS (including the original 4 `ReorganizeAccountTests`), pyflakes clean.
+Expected: all PASS (the original `ReorganizeAccountTests`, the Task 4 `CompileInterestsCommandTests`, and the new `ReorganizeLearningTests` + `CompileInterestsLearningTests`), pyflakes clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add ykbot/app.py tests/test_reorganize.py
-git commit -m "Feed recent /news themes into the daily interests pass"
+git commit -m "Feed recent /news themes into the daily pass and /compileinterests"
 ```
 
 ---
