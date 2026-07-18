@@ -56,6 +56,30 @@ class YKBotBuilderTests(BotTestCase):
     def test_maintenance_key_format(self):
         self.assertEqual(bot.YKBot._maintenance_key("amy"), "maintenance:amy")
 
+    def test_strip_news_preamble_removes_text_before_header(self):
+        reply = (
+            "Now I have enough for the digest, with a natural tie-in.\n\n"
+            "News Digest — Japan Travel — 2026-07-17\n\n"
+            "Costs are going up\n• stuff"
+        )
+        cleaned = bot.YKBot._strip_news_preamble(reply)
+        self.assertTrue(cleaned.startswith("News Digest — Japan Travel"))
+        self.assertNotIn("Now I have enough", cleaned)
+
+    def test_strip_news_preamble_leaves_clean_digest_unchanged(self):
+        reply = "News Digest — Cybersecurity — 2026-07-17\n\nBody"
+        self.assertEqual(bot.YKBot._strip_news_preamble(reply), reply)
+
+    def test_strip_news_preamble_detects_header_inside_bold_tag(self):
+        reply = "Preamble line.\n<b>News Digest — Anime — 2026-07-17</b>\nBody"
+        cleaned = bot.YKBot._strip_news_preamble(reply)
+        self.assertTrue(cleaned.startswith("<b>News Digest — Anime"))
+        self.assertNotIn("Preamble line", cleaned)
+
+    def test_strip_news_preamble_returns_unchanged_when_no_header(self):
+        reply = "Some reply with no header marker at all."
+        self.assertEqual(bot.YKBot._strip_news_preamble(reply), reply)
+
     def test_account_dir_creates_directory_and_returns_path(self):
         news_bot = self._make_bot()
 

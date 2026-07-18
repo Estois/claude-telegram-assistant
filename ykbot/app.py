@@ -295,14 +295,32 @@ class YKBot:
             f'Write a news digest about "{subject}", covering the most significant recent '
             "developments, biased toward my documented interests where they're relevant to "
             "this subject (don't force a connection that isn't there). "
-            "Output ONLY the digest itself — no preamble, no meta-commentary about your "
-            "process or sources of context. "
+            "Begin the reply immediately with the digest header line, which MUST start with "
+            f'the literal words "News Digest" (for example: <b>News Digest — {subject} — '
+            "YYYY-MM-DD</b>). Put NOTHING before that header: no preamble, no lead-in "
+            "sentence, no meta-commentary about your process or sources of context. "
             "Format it for a Telegram message using only these HTML tags: <b>, <i>, <u>, "
             '<s>, <code>, <pre>, and <a href="URL">text</a>. Do not use Markdown syntax '
             "(no **, no #, no [text](url)). Use short paragraphs and simple bullet points "
             "(•) for scanability. Escape any literal <, >, or & characters that aren't part "
             "of a tag."
         )
+
+    @staticmethod
+    def _strip_news_preamble(reply: str) -> str:
+        """Drop any preamble the model emits before the digest header.
+
+        The header always starts with "News Digest" (see _build_news_prompt).
+        Return the reply from the first line whose visible text — after leading
+        whitespace and any opening HTML tags — starts with that marker. If no
+        such line exists, return the reply unchanged rather than risk dropping
+        real content."""
+        lines = reply.splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            visible = re.sub(r"^\s*(?:<[^>]+>\s*)*", "", line)
+            if visible[:11].lower() == "news digest":
+                return "".join(lines[i:])
+        return reply
 
     @staticmethod
     def _build_update_interest_prompt(old_entry: str, new_input: str) -> str:
@@ -391,7 +409,7 @@ class YKBot:
                 logger.exception("Failed to log /news subject for %s", account_id)
         reply = await self._run_claude(update, context, self._build_news_prompt(subject, account_id))
         if reply is not None:
-            await self._send_formatted(update, reply)
+            await self._send_formatted(update, self._strip_news_preamble(reply))
 
     async def handle_add_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
