@@ -10,7 +10,7 @@ from tests.helpers import (
 
 class RequireSessionTests(AsyncBotTestCase):
     def _make_bot(self, **config_overrides):
-        news_bot = bot.NewsBot(make_config(self.tmp_path, **config_overrides))
+        news_bot = bot.YKBot(make_config(self.tmp_path, **config_overrides))
         write_accounts_file(news_bot._config.accounts_file, {"alice": ["hunter2"]})
         return news_bot
 
@@ -49,7 +49,7 @@ class RequireSessionTests(AsyncBotTestCase):
 
 class HandleUnknownCommandTests(AsyncBotTestCase):
     def _make_bot(self, **config_overrides):
-        news_bot = bot.NewsBot(make_config(self.tmp_path, **config_overrides))
+        news_bot = bot.YKBot(make_config(self.tmp_path, **config_overrides))
         write_accounts_file(news_bot._config.accounts_file, {"alice": ["hunter2"]})
         return news_bot
 
@@ -75,7 +75,7 @@ class HandleUnknownCommandTests(AsyncBotTestCase):
 
 class RequireAdminLockedCallerTests(AsyncBotTestCase):
     async def test_locked_caller_gets_trivia_not_a_lock_notice(self):
-        news_bot = bot.NewsBot(
+        news_bot = bot.YKBot(
             make_config(self.tmp_path, admin_account_id="amy", admin_telegram_user_id=999)
         )
         write_accounts_file(news_bot._config.accounts_file, {"amy": ["adminpass"]})

@@ -11,7 +11,7 @@ from tests.helpers import (
 
 class FormatUserListingTests(BotTestCase):
     def _make_bot(self, **config_overrides):
-        return bot.NewsBot(make_config(self.tmp_path, **config_overrides))
+        return bot.YKBot(make_config(self.tmp_path, **config_overrides))
 
     def test_no_accounts_configured(self):
         news_bot = self._make_bot()
@@ -46,7 +46,7 @@ class HandleGetUsersTests(AsyncBotTestCase):
     ADMIN_TELEGRAM_USER_ID = 999
 
     def _make_bot(self):
-        news_bot = bot.NewsBot(
+        news_bot = bot.YKBot(
             make_config(
                 self.tmp_path,
                 admin_account_id="amy",

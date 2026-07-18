@@ -22,7 +22,7 @@ class FakeClaudeClient:
 
 class ReorganizeAccountTests(AsyncBotTestCase):
     def _make_bot(self, **overrides):
-        return bot.NewsBot(make_config(self.tmp_path, **overrides))
+        return bot.YKBot(make_config(self.tmp_path, **overrides))
 
     async def test_reorganize_rewrites_the_interests_list(self):
         news_bot = self._make_bot()

@@ -24,32 +24,32 @@ class FakeClaudeClient:
 
 class UsageLimitResetNoticeTests(unittest.TestCase):
     def test_returns_none_when_no_usage_limit_mentioned(self):
-        self.assertIsNone(bot.NewsBot._usage_limit_reset_notice("Here is your news digest."))
+        self.assertIsNone(bot.YKBot._usage_limit_reset_notice("Here is your news digest."))
 
     def test_extracts_reset_time_after_reset_at(self):
         text = "Claude AI usage limit reached. Your limit will reset at 9am (Asia/Singapore)."
 
-        self.assertEqual(bot.NewsBot._usage_limit_reset_notice(text), "9am (Asia/Singapore)")
+        self.assertEqual(bot.YKBot._usage_limit_reset_notice(text), "9am (Asia/Singapore)")
 
     def test_extracts_reset_time_after_resets_in(self):
         text = "Your usage limit resets in 4 hours."
 
-        self.assertEqual(bot.NewsBot._usage_limit_reset_notice(text), "4 hours")
+        self.assertEqual(bot.YKBot._usage_limit_reset_notice(text), "4 hours")
 
     def test_falls_back_to_soon_when_reset_time_not_parseable(self):
         text = "You have hit your usage limit."
 
-        self.assertEqual(bot.NewsBot._usage_limit_reset_notice(text), "soon")
+        self.assertEqual(bot.YKBot._usage_limit_reset_notice(text), "soon")
 
     def test_matching_is_case_insensitive(self):
         text = "USAGE LIMIT reached, RESETS AT 3pm."
 
-        self.assertEqual(bot.NewsBot._usage_limit_reset_notice(text), "3pm")
+        self.assertEqual(bot.YKBot._usage_limit_reset_notice(text), "3pm")
 
 
 class BuildUsageLimitMessageTests(unittest.TestCase):
     def test_includes_the_reset_notice_and_mentions_usage_limit(self):
-        message = bot.NewsBot._build_usage_limit_message("9am (Asia/Singapore)")
+        message = bot.YKBot._build_usage_limit_message("9am (Asia/Singapore)")
 
         self.assertIn("9am (Asia/Singapore)", message)
         self.assertIn("usage limit", message.lower())
@@ -57,7 +57,7 @@ class BuildUsageLimitMessageTests(unittest.TestCase):
 
 class RunClaudeUsageLimitTests(AsyncBotTestCase):
     def _make_bot(self):
-        return bot.NewsBot(make_config(self.tmp_path))
+        return bot.YKBot(make_config(self.tmp_path))
 
     async def test_successful_reply_mentioning_usage_limit_passes_through_unchanged(self):
         # A legitimate digest may discuss usage limits as a topic. A

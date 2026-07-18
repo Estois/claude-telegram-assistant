@@ -2,9 +2,9 @@ import bot
 from tests.helpers import BotTestCase, make_config
 
 
-class NewsBotBuilderTests(BotTestCase):
+class YKBotBuilderTests(BotTestCase):
     def _make_bot(self, **config_overrides):
-        return bot.NewsBot(make_config(self.tmp_path, **config_overrides))
+        return bot.YKBot(make_config(self.tmp_path, **config_overrides))
 
     def test_build_command_list_excludes_admin_only_by_default(self):
         news_bot = self._make_bot()
@@ -54,7 +54,7 @@ class NewsBotBuilderTests(BotTestCase):
         self.assertIn("/removeuser", welcome)
 
     def test_maintenance_key_format(self):
-        self.assertEqual(bot.NewsBot._maintenance_key("amy"), "maintenance:amy")
+        self.assertEqual(bot.YKBot._maintenance_key("amy"), "maintenance:amy")
 
     def test_account_dir_creates_directory_and_returns_path(self):
         news_bot = self._make_bot()

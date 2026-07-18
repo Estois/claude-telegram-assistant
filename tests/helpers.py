@@ -17,7 +17,7 @@ class BotTestCase(unittest.TestCase):
 
 
 class AsyncBotTestCase(unittest.IsolatedAsyncioTestCase):
-    """Like BotTestCase, but for tests that need to await NewsBot's async
+    """Like BotTestCase, but for tests that need to await YKBot's async
     handler methods."""
 
     def setUp(self):
@@ -47,7 +47,7 @@ class FakeMessage:
 
 
 class FakeUpdate:
-    """Minimal stand-in for telegram.Update, covering what NewsBot's
+    """Minimal stand-in for telegram.Update, covering what YKBot's
     handlers actually touch: effective_user/effective_chat for
     authorization and account lookup, message/effective_message for
     replies (effective_message is used so this also works for the
@@ -81,7 +81,7 @@ class FakeContext:
 
 def make_config(tmp_path: Path, **overrides) -> "bot.Config":
     """Builds a Config with every file/dir rooted under tmp_path, so tests
-    that need a full NewsBot instance never touch real repo data. Pass
+    that need a full YKBot instance never touch real repo data. Pass
     keyword overrides for anything a specific test cares about."""
     defaults = dict(
         base_dir=tmp_path,
