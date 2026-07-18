@@ -29,6 +29,7 @@ from ykbot.claude import ClaudeClient, ClaudeSessionStore
 from ykbot.config import Config
 from ykbot.formatting import CommandSpec, TelegramFormatter
 from ykbot.interests import InterestsStore
+from ykbot.news_history import NewsHistoryStore
 from ykbot.trivia import FALLBACK_TRIVIA, TriviaBook
 
 logging.basicConfig(
@@ -41,6 +42,7 @@ class YKBot:
 
     INTERESTS_FILENAME = "interests.md"
     BUS_LOCATIONS_FILENAME = "bus_locations.json"
+    NEWS_HISTORY_FILENAME = "news_history.jsonl"
 
     USAGE_LIMIT_PATTERN = re.compile(r"usage limit", re.IGNORECASE)
     USAGE_LIMIT_RESET_PATTERN = re.compile(r"reset[s]?\s+(?:at|on|in)?\s*([^.\n]+)", re.IGNORECASE)
@@ -64,6 +66,9 @@ class YKBot:
 
     def _interests_for(self, account_id: str) -> InterestsStore:
         return InterestsStore(self._account_dir(account_id) / self.INTERESTS_FILENAME)
+
+    def _news_history_for(self, account_id: str) -> NewsHistoryStore:
+        return NewsHistoryStore(self._account_dir(account_id) / self.NEWS_HISTORY_FILENAME)
 
     def _bus_locations_for(self, account_id: str) -> BusLocationsStore:
         return BusLocationsStore(self._account_dir(account_id) / self.BUS_LOCATIONS_FILENAME)
@@ -353,6 +358,12 @@ class YKBot:
             return
 
         subject = " ".join(context.args)
+        if self._config.news_learning_enabled:
+            try:
+                self._news_history_for(account_id).append(subject)
+            except Exception:
+                # Logging the subject must never break the digest reply.
+                logger.exception("Failed to log /news subject for %s", account_id)
         reply = await self._run_claude(update, context, self._build_news_prompt(subject, account_id))
         if reply is not None:
             await self._send_formatted(update, reply)
