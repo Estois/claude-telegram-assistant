@@ -465,11 +465,11 @@ class YKBot:
 
         interests = self._interests_for(account_id)
         entries = interests.list()
-        if len(entries) < 2:
+        theme_counts = self._recent_theme_counts(account_id)
+        if len(entries) < 2 and not theme_counts:
             await update.message.reply_text("Need at least 2 interests to reorganize. See /getinterests.")
             return
 
-        theme_counts = self._recent_theme_counts(account_id)
         prompt = self._build_reorganize_prompt(entries, theme_counts)
         raw_reply = await self._run_claude(
             update, context, prompt, chat_id=self._maintenance_key(account_id)

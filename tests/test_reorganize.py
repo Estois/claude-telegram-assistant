@@ -195,6 +195,25 @@ class CompileInterestsLearningTests(AsyncBotTestCase):
         )
         self.assertIn("quantum computing (requested 2x)", captured["prompt"])
 
+    async def test_compile_proceeds_with_one_interest_and_recurring_history(self):
+        news_bot = self._make_bot()
+        for _ in range(2):
+            news_bot._news_history_for("alice").append("quantum computing")
+        news_bot._interests_for("alice").add("games")
+        captured = {}
+
+        async def fake_run_claude(update, context, prompt, chat_id=None):
+            captured["prompt"] = prompt
+            return "1. games\n2. quantum computing"
+
+        news_bot._run_claude = fake_run_claude
+        await news_bot.handle_compile_interests(
+            FakeUpdate(user_id=1, chat_id=1), FakeContext(args=[])
+        )
+        self.assertTrue(captured.get("prompt"))
+        self.assertIn("quantum computing (requested 2x)", captured["prompt"])
+        self.assertEqual(news_bot._interests_for("alice").list(), ["games", "quantum computing"])
+
     async def test_compile_ignores_history_when_disabled(self):
         news_bot = self._make_bot(news_learning_enabled=False)
         for _ in range(2):
