@@ -10,6 +10,7 @@ trivia_cache.json
 trivia_state.json
 *.log
 bus_stops_cache.json
+message_logs/
 .pytest_cache/
 .coverage
 .claude/

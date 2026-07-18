@@ -42,6 +42,8 @@ class Config:
     news_learning_enabled: bool
     news_history_window_days: int
     news_history_max_entries: int
+    message_logging_enabled: bool
+    message_logs_dir: Path
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -94,4 +96,9 @@ class Config:
             != "false",
             news_history_window_days=int(os.environ.get("NEWS_HISTORY_WINDOW_DAYS", "60")),
             news_history_max_entries=int(os.environ.get("NEWS_HISTORY_MAX_ENTRIES", "100")),
+            message_logging_enabled=os.environ.get("MESSAGE_LOGGING_ENABLED", "true").strip().lower()
+            != "false",
+            message_logs_dir=Path(
+                os.environ.get("MESSAGE_LOGS_DIR", str(base_dir / "message_logs"))
+            ).resolve(),
         )

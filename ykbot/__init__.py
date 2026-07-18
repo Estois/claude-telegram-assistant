@@ -13,6 +13,7 @@ from ykbot.claude import ClaudeClient, ClaudeSessionStore
 from ykbot.config import Config
 from ykbot.formatting import CommandSpec, TelegramFormatter
 from ykbot.interests import InterestsStore
+from ykbot.message_log import MessageLogStore
 from ykbot.news_history import NewsHistoryStore
 from ykbot.trivia import FALLBACK_TRIVIA, AnimalEmoji, TriviaBook
 
@@ -23,6 +24,7 @@ __all__ = [
     "ClaudeSessionStore",
     "ClaudeClient",
     "InterestsStore",
+    "MessageLogStore",
     "NewsHistoryStore",
     "AnimalEmoji",
     "TriviaBook",

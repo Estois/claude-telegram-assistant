@@ -242,6 +242,22 @@ description in `bus_stops_cache.json` (e.g. "Opp Parkway East Hosp
 (83159)"), falling back to just the stop code if that cache isn't built
 yet.
 
+## Message logging
+
+Messages from **unlocked** chats are appended to per-user files under
+`message_logs/` (gitignored), one file per sender — `<username>.log`, or
+`id_<telegram_user_id>.log` for users with no `@username`. Each line is a
+tab-separated `ISO-timestamp` and the message text (commands included;
+non-text messages such as shared locations are recorded as
+`[non-text message]`).
+
+The logger runs in an earlier handler group than the command handlers, and
+only writes for chats that are **already unlocked**. The unlock message
+itself is still locked at that point, so **password attempts (and wrong
+guesses) are never logged** — consistent with the rest of the bot never
+storing plaintext passwords. Set `MESSAGE_LOGGING_ENABLED=false` to turn the
+feature off, or `MESSAGE_LOGS_DIR` to relocate the folder.
+
 ## Setup
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token it gives you.
@@ -369,6 +385,8 @@ Optional environment variables (see `.env.example`):
 | `NEWS_LEARNING_ENABLED` | `true` | Enable passive learning from `/news` requests; set to `false` to disable logging |
 | `NEWS_HISTORY_WINDOW_DAYS` | `60` | How many days of `/news` history to consider when detecting recurring themes |
 | `NEWS_HISTORY_MAX_ENTRIES` | `100` | Maximum logged `/news` requests per account; oldest entries are pruned first |
+| `MESSAGE_LOGGING_ENABLED` | `true` | Log messages from unlocked chats to `message_logs/`; set to `false` to disable |
+| `MESSAGE_LOGS_DIR` | `message_logs/` | Directory holding the per-user message log files |
 | `ENV_FILE` | `.env` | Path `/adduserteleid` rewrites `TELEGRAM_ALLOWED_USER_IDS` in |
 | `ADMIN_ACCOUNT_ID` | `amy` | Account id allowed to use the admin commands (see Admin account) |
 | `ADMIN_TELEGRAM_USER_ID` | `100000001` | Telegram user id allowed to use the admin commands, alongside `ADMIN_ACCOUNT_ID` |

@@ -20,6 +20,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
@@ -30,6 +31,7 @@ from ykbot.claude import ClaudeClient, ClaudeSessionStore
 from ykbot.config import Config
 from ykbot.formatting import CommandSpec, TelegramFormatter
 from ykbot.interests import InterestsStore
+from ykbot.message_log import MessageLogStore
 from ykbot.news_history import NewsHistoryStore
 from ykbot.trivia import FALLBACK_TRIVIA, TriviaBook
 
@@ -57,6 +59,7 @@ class YKBot:
         self._trivia = TriviaBook(config.trivia_cache_file, config.trivia_state_file, FALLBACK_TRIVIA)
         self._lta = LtaBusClient(config.lta_api_key)
         self._bus_stops = BusStopsCache(config.bus_stops_cache_file)
+        self._message_log = MessageLogStore(config.message_logs_dir)
         self._command_specs = self._build_command_specs()
         self._reorganize_task: Optional[asyncio.Task] = None
 
@@ -201,6 +204,11 @@ class YKBot:
             .post_shutdown(self._on_shutdown)
             .build()
         )
+        # Runs before every other handler (lower group) so it sees each
+        # message. It logs only already-unlocked chats, so the unlock message
+        # itself — still locked at this point — is never logged (see
+        # _log_message); passwords therefore never reach disk.
+        app.add_handler(TypeHandler(Update, self._log_message), group=-1)
         # /start isn't in _command_specs — it's just a generic greeting, not
         # a documented capability, so it stays out of /help and the welcome
         # message's command list.
@@ -815,6 +823,25 @@ class YKBot:
         # Wrong password (or none configured yet) — no hint that this was an
         # auth attempt, just a generic reply.
         await update.message.reply_text(self._trivia.next_fact())
+
+    async def _log_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Appends each incoming message to a per-user file. Registered in an
+        earlier handler group so it runs before the command handlers.
+
+        Only messages from an already-unlocked chat are logged: the unlock
+        message (a password) is still locked when this runs, so passwords and
+        wrong guesses never reach disk. Callback-query updates carry no
+        message and are skipped."""
+        if not self._config.message_logging_enabled:
+            return
+        message = update.message
+        if message is None:
+            return
+        if self._accounts.account_for(update.effective_chat.id) is None:
+            return
+        user = update.effective_user
+        text = message.text if message.text is not None else "[non-text message]"
+        self._message_log.log(user.username, user.id, text)
 
     # -- Claude dispatch ----------------------------------------------------
 

@@ -26,9 +26,10 @@ class AsyncBotTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 class FakeUser:
-    def __init__(self, id, full_name=None):
+    def __init__(self, id, full_name=None, username=None):
         self.id = id
         self.full_name = full_name
+        self.username = username
 
 
 class FakeChat:
@@ -95,8 +96,9 @@ class FakeUpdate:
         message_id: int = 1,
         location=None,
         full_name: str = None,
+        username: str = None,
     ):
-        self.effective_user = FakeUser(user_id, full_name=full_name)
+        self.effective_user = FakeUser(user_id, full_name=full_name, username=username)
         self.effective_chat = FakeChat(chat_id)
         self.message = FakeMessage(text=text, message_id=message_id, location=location)
         self.effective_message = self.message
@@ -162,6 +164,8 @@ def make_config(tmp_path: Path, **overrides) -> "bot.Config":
         news_learning_enabled=True,
         news_history_window_days=60,
         news_history_max_entries=100,
+        message_logging_enabled=True,
+        message_logs_dir=tmp_path / "message_logs",
     )
     defaults.update(overrides)
     return bot.Config(**defaults)
