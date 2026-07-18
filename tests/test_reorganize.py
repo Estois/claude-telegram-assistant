@@ -110,6 +110,110 @@ class CompileInterestsCommandTests(AsyncBotTestCase):
         self.assertEqual(news_bot._interests_for("alice").list(), ["a", "b"])
 
 
+class ReorganizeLearningTests(AsyncBotTestCase):
+    def _make_bot(self, **overrides):
+        return bot.YKBot(make_config(self.tmp_path, **overrides))
+
+    async def test_recurring_theme_and_counts_reach_the_prompt(self):
+        news_bot = self._make_bot()
+        history = news_bot._news_history_for("amy")
+        for _ in range(3):
+            history.append("quantum computing")
+        history.append("obscure onetime")
+        news_bot._interests_for("amy").add("games")  # only 1 interest, but history exists
+        fake = FakeClaudeClient("1. games\n2. quantum computing")
+        news_bot._claude = fake
+
+        await news_bot._reorganize_account("amy")
+
+        prompt = fake.calls[0][1]
+        self.assertIn("quantum computing (requested 3x)", prompt)
+        self.assertIn("obscure onetime (requested 1x)", prompt)
+        self.assertEqual(
+            news_bot._interests_for("amy").list(), ["games", "quantum computing"]
+        )
+
+    async def test_history_pruned_after_pass(self):
+        news_bot = self._make_bot(news_history_window_days=60, news_history_max_entries=100)
+        history = news_bot._news_history_for("amy")
+        # one in-window, one ancient
+        history.append("keep me")
+        path = news_bot._account_dir("amy") / news_bot.NEWS_HISTORY_FILENAME
+        import json, time
+        with path.open("a") as h:
+            h.write(json.dumps({"ts": time.time() - 999 * 86400, "subject": "ancient"}) + "\n")
+        news_bot._interests_for("amy").add("a")
+        news_bot._interests_for("amy").add("b")
+        news_bot._claude = FakeClaudeClient("1. a\n2. b")
+
+        await news_bot._reorganize_account("amy")
+
+        self.assertNotIn("ancient", path.read_text())
+        self.assertIn("keep me", path.read_text())
+
+    async def test_skips_when_no_interests_and_no_history(self):
+        news_bot = self._make_bot()
+        fake = FakeClaudeClient("1. should not be used")
+        news_bot._claude = fake
+        await news_bot._reorganize_account("amy")
+        self.assertEqual(fake.calls, [])
+
+    async def test_disabled_learning_ignores_history(self):
+        news_bot = self._make_bot(news_learning_enabled=False)
+        history = news_bot._news_history_for("amy")
+        for _ in range(3):
+            history.append("quantum computing")
+        news_bot._interests_for("amy").add("games")  # only 1 interest
+        fake = FakeClaudeClient("1. should not be used")
+        news_bot._claude = fake
+        await news_bot._reorganize_account("amy")
+        self.assertEqual(fake.calls, [])  # <2 interests and history ignored -> skip
+
+
+class CompileInterestsLearningTests(AsyncBotTestCase):
+    def _make_bot(self, **overrides):
+        news_bot = bot.YKBot(make_config(self.tmp_path, **overrides))
+        write_accounts_file(news_bot._config.accounts_file, {"alice": ["hunter2"]})
+        news_bot._accounts.try_unlock(chat_id=1, attempt="hunter2")
+        return news_bot
+
+    async def test_compile_folds_recurring_history_into_prompt(self):
+        news_bot = self._make_bot()
+        for _ in range(2):
+            news_bot._news_history_for("alice").append("quantum computing")
+        news_bot._interests_for("alice").add("games")
+        news_bot._interests_for("alice").add("anime")
+        captured = {}
+
+        async def fake_run_claude(update, context, prompt, chat_id=None):
+            captured["prompt"] = prompt
+            return "1. games\n2. anime\n3. quantum computing"
+
+        news_bot._run_claude = fake_run_claude
+        await news_bot.handle_compile_interests(
+            FakeUpdate(user_id=1, chat_id=1), FakeContext(args=[])
+        )
+        self.assertIn("quantum computing (requested 2x)", captured["prompt"])
+
+    async def test_compile_ignores_history_when_disabled(self):
+        news_bot = self._make_bot(news_learning_enabled=False)
+        for _ in range(2):
+            news_bot._news_history_for("alice").append("quantum computing")
+        news_bot._interests_for("alice").add("games")
+        news_bot._interests_for("alice").add("anime")
+        captured = {}
+
+        async def fake_run_claude(update, context, prompt, chat_id=None):
+            captured["prompt"] = prompt
+            return "1. games\n2. anime"
+
+        news_bot._run_claude = fake_run_claude
+        await news_bot.handle_compile_interests(
+            FakeUpdate(user_id=1, chat_id=1), FakeContext(args=[])
+        )
+        self.assertNotIn("requested", captured["prompt"])
+
+
 class ReorganizePromptTests(unittest.TestCase):
     def test_no_history_block_when_theme_counts_empty(self):
         prompt = bot.YKBot._build_reorganize_prompt(["games", "anime"], [])

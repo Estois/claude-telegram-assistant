@@ -70,6 +70,17 @@ class YKBot:
     def _news_history_for(self, account_id: str) -> NewsHistoryStore:
         return NewsHistoryStore(self._account_dir(account_id) / self.NEWS_HISTORY_FILENAME)
 
+    def _recent_theme_counts(self, account_id: str) -> list:
+        """Recent /news request themes with counts for this account, or an
+        empty list when learning is disabled. Shared by the daily reorganize
+        job and the manual /compileinterests command so they behave the same."""
+        if not self._config.news_learning_enabled:
+            return []
+        return self._news_history_for(account_id).theme_counts(
+            self._config.news_history_window_days,
+            self._config.news_history_max_entries,
+        )
+
     def _bus_locations_for(self, account_id: str) -> BusLocationsStore:
         return BusLocationsStore(self._account_dir(account_id) / self.BUS_LOCATIONS_FILENAME)
 
@@ -458,7 +469,7 @@ class YKBot:
             await update.message.reply_text("Need at least 2 interests to reorganize. See /getinterests.")
             return
 
-        theme_counts = []  # TODO(Task 5): fold in recent /news history here too
+        theme_counts = self._recent_theme_counts(account_id)
         prompt = self._build_reorganize_prompt(entries, theme_counts)
         raw_reply = await self._run_claude(
             update, context, prompt, chat_id=self._maintenance_key(account_id)
@@ -860,10 +871,13 @@ class YKBot:
         async with self._claude.lock_for(maintenance_key):
             interests = self._interests_for(account_id)
             entries = interests.list()
-            if len(entries) < 2:
-                return  # nothing meaningful to merge or expand
+            theme_counts = self._recent_theme_counts(account_id)
 
-            theme_counts = []  # TODO(Task 5): wire real /news request history
+            # Nothing to do without either enough interests to reorganize or any
+            # request history to learn from.
+            if len(entries) < 2 and not theme_counts:
+                return
+
             prompt = self._build_reorganize_prompt(entries, theme_counts)
             raw_reply = await self._claude.run(maintenance_key, prompt)
             new_entries = InterestsStore.parse_entries(raw_reply)
@@ -872,10 +886,20 @@ class YKBot:
                     "Interests reorganize for %s returned nothing parseable, leaving its interests.md untouched",
                     account_id,
                 )
-                return
+            else:
+                interests.replace_all(new_entries)
+                logger.info(
+                    "Reorganized interests for %s: %d -> %d entries",
+                    account_id, len(entries), len(new_entries),
+                )
 
-            interests.replace_all(new_entries)
-            logger.info("Reorganized interests for %s: %d -> %d entries", account_id, len(entries), len(new_entries))
+            # Prune the log to the window after the daily pass (the manual
+            # /compileinterests path deliberately does not prune).
+            if self._config.news_learning_enabled:
+                self._news_history_for(account_id).prune(
+                    self._config.news_history_window_days,
+                    self._config.news_history_max_entries,
+                )
 
 
 def main() -> None:
