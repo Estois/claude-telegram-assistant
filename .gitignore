@@ -11,4 +11,5 @@ trivia_state.json
 *.log
 bus_stops_cache.json
 .pytest_cache/
+.coverage
 .claude/
