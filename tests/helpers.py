@@ -26,8 +26,9 @@ class AsyncBotTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 class FakeUser:
-    def __init__(self, id):
+    def __init__(self, id, full_name=None):
         self.id = id
+        self.full_name = full_name
 
 
 class FakeChat:
@@ -37,10 +38,14 @@ class FakeChat:
 
 class FakeMessage:
     """Stand-in for telegram.Message: records reply_text calls instead of
-    hitting the real Telegram API."""
+    hitting the real Telegram API. text/message_id/location cover what the
+    plain-text (password) and location handlers read off the message."""
 
-    def __init__(self):
+    def __init__(self, text=None, message_id=1, location=None):
         self.replies: list = []
+        self.text = text
+        self.message_id = message_id
+        self.location = location
 
     async def reply_text(self, text, **kwargs):
         self.replies.append(text)
@@ -81,10 +86,19 @@ class FakeUpdate:
     Pass callback_data to also attach a FakeCallbackQuery, for testing the
     inline-button (callback-query) handlers."""
 
-    def __init__(self, user_id: int, chat_id: int, callback_data: str = None):
-        self.effective_user = FakeUser(user_id)
+    def __init__(
+        self,
+        user_id: int,
+        chat_id: int,
+        callback_data: str = None,
+        text: str = None,
+        message_id: int = 1,
+        location=None,
+        full_name: str = None,
+    ):
+        self.effective_user = FakeUser(user_id, full_name=full_name)
         self.effective_chat = FakeChat(chat_id)
-        self.message = FakeMessage()
+        self.message = FakeMessage(text=text, message_id=message_id, location=location)
         self.effective_message = self.message
         self.callback_query = (
             FakeCallbackQuery(callback_data, self.message)
@@ -94,16 +108,22 @@ class FakeUpdate:
 
 
 class FakeBot:
-    """Stand-in for the telegram.Bot handed to handlers as context.bot."""
+    """Stand-in for the telegram.Bot handed to handlers as context.bot;
+    records send_message/delete_message calls for assertions."""
+
+    def __init__(self):
+        self.sent: list = []  # (chat_id, text) tuples
+        self.deleted: list = []  # (chat_id, message_id) tuples
+        self.actions: list = []  # (chat_id, action) tuples
 
     async def send_chat_action(self, chat_id, action):
-        pass
+        self.actions.append((chat_id, action))
 
     async def send_message(self, chat_id, text, **kwargs):
-        pass
+        self.sent.append((chat_id, text))
 
     async def delete_message(self, chat_id, message_id):
-        pass
+        self.deleted.append((chat_id, message_id))
 
 
 class FakeContext:
