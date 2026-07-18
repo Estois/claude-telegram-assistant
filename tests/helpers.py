@@ -105,6 +105,9 @@ def make_config(tmp_path: Path, **overrides) -> "bot.Config":
         lta_api_key=None,
         bus_stops_cache_file=tmp_path / "bus_stops_cache.json",
         bus_nearby_count=3,
+        news_learning_enabled=True,
+        news_history_window_days=60,
+        news_history_max_entries=100,
     )
     defaults.update(overrides)
     return bot.Config(**defaults)

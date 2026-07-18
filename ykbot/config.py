@@ -39,6 +39,9 @@ class Config:
     lta_api_key: Optional[str]
     bus_stops_cache_file: Path
     bus_nearby_count: int
+    news_learning_enabled: bool
+    news_history_window_days: int
+    news_history_max_entries: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -87,4 +90,8 @@ class Config:
                 os.environ.get("BUS_STOPS_CACHE_FILE", str(base_dir / "bus_stops_cache.json"))
             ).resolve(),
             bus_nearby_count=int(os.environ.get("BUS_NEARBY_COUNT", "3")),
+            news_learning_enabled=os.environ.get("NEWS_LEARNING_ENABLED", "true").strip().lower()
+            != "false",
+            news_history_window_days=int(os.environ.get("NEWS_HISTORY_WINDOW_DAYS", "60")),
+            news_history_max_entries=int(os.environ.get("NEWS_HISTORY_MAX_ENTRIES", "100")),
         )
