@@ -8,9 +8,8 @@ Claude. See README.md for setup and the command list.
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 # Third-party
 from dotenv import load_dotenv
@@ -35,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 from ykbot.config import Config
+from ykbot.formatting import CommandSpec, TelegramFormatter
 from ykbot.trivia import FALLBACK_TRIVIA, AnimalEmoji, TriviaBook
 from ykbot.bus import BusLocationsStore, BusStopsCache, LtaBusClient
 from ykbot.interests import InterestsStore
@@ -63,56 +63,6 @@ __all__ = [
     "main",
     "logger",
 ]
-
-
-class TelegramFormatter:
-    """Splits long text into Telegram-sized chunks, preferring to break on
-    paragraph boundaries so HTML tags aren't split across messages."""
-
-    MESSAGE_LIMIT = 4000
-
-    @classmethod
-    def chunk(cls, text: str) -> list:
-        if not text:
-            return ["(no output)"]
-        if len(text) <= cls.MESSAGE_LIMIT:
-            return [text]
-
-        chunks = []
-        current = ""
-        for paragraph in text.split("\n\n"):
-            candidate = f"{current}\n\n{paragraph}" if current else paragraph
-            if len(candidate) <= cls.MESSAGE_LIMIT:
-                current = candidate
-                continue
-
-            if current:
-                chunks.append(current)
-            current = paragraph
-            while len(current) > cls.MESSAGE_LIMIT:
-                chunks.append(current[: cls.MESSAGE_LIMIT])
-                current = current[cls.MESSAGE_LIMIT :]
-
-        if current:
-            chunks.append(current)
-        return chunks
-
-
-@dataclass(frozen=True)
-class CommandSpec:
-    """One registered command: what it's called, how it's registered with
-    Telegram, and how it's described in /help and the post-unlock welcome
-    message — a single source of truth so a new command shows up in both
-    places just by being added to NewsBot._build_command_specs, with
-    nothing to keep in sync by hand. admin_only commands are registered
-    like any other (the handler itself enforces the admin check) but are
-    only listed for an admin session."""
-
-    name: str
-    usage: str
-    description: str
-    handler: Callable
-    admin_only: bool = False
 
 
 class NewsBot:
