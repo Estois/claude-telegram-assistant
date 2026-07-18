@@ -33,6 +33,14 @@ class NewsHistoryEdgeTests(BotTestCase):
 
         self.assertEqual([r["subject"] for r in recent], ["ok"])
 
+    def test_blank_lines_between_records_are_ignored(self):
+        path = self.tmp_path / "news_history.jsonl"
+        path.write_text("\n" + json.dumps({"ts": time.time(), "subject": "ok"}) + "\n\n")
+
+        recent = self._store().recent(60, 100)
+
+        self.assertEqual([r["subject"] for r in recent], ["ok"])
+
 
 class AccountsFilePreservationTests(BotTestCase):
     def test_leading_comments_survive_a_rewrite(self):
