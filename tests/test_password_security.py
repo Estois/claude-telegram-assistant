@@ -1,4 +1,5 @@
 import hashlib
+import os
 
 import bot
 from ykbot import accounts
@@ -82,7 +83,10 @@ class AtomicWriteTests(BotTestCase):
 
         path = self.tmp_path / "accounts.hash"
         self.assertEqual(store.list_ids(), ["alice"])
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        # POSIX-only: on Windows os.chmod only honors the read-only bit, so a
+        # writable file always reports 0o666 regardless of the mode we request.
+        if os.name == "posix":
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         # No stray temp file left behind.
         self.assertEqual([p for p in self.tmp_path.iterdir() if p.name != "accounts.hash"], [])
 
@@ -93,7 +97,8 @@ class AtomicWriteTests(BotTestCase):
         store.add(42)
 
         self.assertIn("TELEGRAM_ALLOWED_USER_IDS=1,42", env.read_text())
-        self.assertEqual(env.stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":  # see note in the accounts.hash test above
+            self.assertEqual(env.stat().st_mode & 0o777, 0o600)
         self.assertEqual([p for p in self.tmp_path.iterdir() if p.name != ".env"], [])
 
     def test_atomic_write_reraises_and_swallows_cleanup_failure(self):
