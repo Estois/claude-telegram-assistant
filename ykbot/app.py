@@ -261,6 +261,10 @@ class YKBot:
             pattern=r"^act:(getinterests|compile|endsession|news|summarize|addinterest)$"))
         app.add_handler(CallbackQueryHandler(self.handle_interest_pick, pattern=r"^int_pick:"))
         app.add_handler(CallbackQueryHandler(self.handle_interest_select, pattern=r"^int_(rm|upd):"))
+        app.add_handler(CallbackQueryHandler(
+            self.handle_admin_action, pattern=r"^act:(getusers|adduserteleid)$"))
+        app.add_handler(CallbackQueryHandler(self.handle_admin_pick_remove, pattern=r"^adm_pick_rm$"))
+        app.add_handler(CallbackQueryHandler(self.handle_admin_select_remove, pattern=r"^adm_rm:"))
         app.add_handler(CallbackQueryHandler(self.handle_confirm, pattern=r"^cfm:"))
         app.add_handler(CallbackQueryHandler(self.handle_cancel, pattern=r"^cxl:"))
         app.add_handler(MessageHandler(filters.LOCATION, self.handle_location))
@@ -587,6 +591,10 @@ class YKBot:
         elif token.startswith("int_rm:"):
             index = int(token.split(":", 1)[1])
             await self._do_remove_interest(update, account_id, index)
+        elif token.startswith("adm_rm:"):
+            if await self._require_admin(update) is None:
+                return
+            await self._do_remove_user(update, token.split(":", 1)[1])
 
     async def handle_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -873,16 +881,15 @@ class YKBot:
             await update.message.reply_text("Usage: /removeuser <name>")
             return
 
-        name = context.args[0]
-        if name == self._config.admin_account_id:
-            await update.message.reply_text("Refusing to remove the admin account.")
-            return
+        await self._do_remove_user(update, context.args[0])
 
+    async def _do_remove_user(self, update: Update, name: str) -> None:
+        if name == self._config.admin_account_id:
+            await update.effective_message.reply_text("Refusing to remove the admin account.")
+            return
         removed = self._accounts.remove_account(name)
-        await update.message.reply_text(
-            f"Removed account '{name}' from {self._config.accounts_file.name}."
-            if removed
-            else f"No account named '{name}'."
+        await update.effective_message.reply_text(
+            f"Removed account '{name}'." if removed else f"No account named '{name}'."
         )
 
     async def handle_add_user_tele_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -893,9 +900,16 @@ class YKBot:
             await update.message.reply_text("Usage: /adduserteleid <telegram_user_id>")
             return
 
-        user_id = int(context.args[0])
+        await self._do_add_user_tele_id(update, context.args[0])
+
+    async def _do_add_user_tele_id(self, update: Update, raw: str) -> None:
+        raw = raw.strip()
+        if not raw.isdigit():
+            await update.effective_message.reply_text("That isn't a numeric Telegram user id.")
+            return
+        user_id = int(raw)
         added = self._allowlist.add(user_id)
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"Added {user_id} to the allowlist." if added else f"{user_id} is already allowed."
         )
 
@@ -912,6 +926,44 @@ class YKBot:
         return "\n".join(
             f"{account_id} — {'🟢 active' if self._accounts.has_active_session(account_id) else '🔒 locked'}"
             for account_id in account_ids
+        )
+
+    async def handle_admin_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if await self._require_admin(update) is None:
+            await query.answer()
+            return
+        await query.answer()
+        action = query.data.split(":", 1)[1]
+        if action == "getusers":
+            await query.edit_message_text(self._format_user_listing())
+        elif action == "adduserteleid":
+            context.user_data["awaiting"] = {"kind": "add_user_tele_id", "payload": {}}
+            await query.edit_message_text("Send the Telegram user id to allow:")
+
+    async def handle_admin_pick_remove(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if await self._require_admin(update) is None:
+            await query.answer()
+            return
+        await query.answer()
+        accounts = [a for a in self._accounts.list_ids() if a != self._config.admin_account_id]
+        if not accounts:
+            await query.edit_message_text("No removable accounts.", reply_markup=menus.admin_keyboard())
+            return
+        await query.edit_message_text(
+            "Pick an account to remove:", reply_markup=menus.account_pick_keyboard(accounts)
+        )
+
+    async def handle_admin_select_remove(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if await self._require_admin(update) is None:
+            await query.answer()
+            return
+        await query.answer()
+        name = query.data.split(":", 1)[1]
+        await query.edit_message_text(
+            f"Remove account '{name}'?", reply_markup=menus.confirm_keyboard(f"adm_rm:{name}")
         )
 
     async def handle_bus(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1222,6 +1274,9 @@ class YKBot:
                 await self._do_summarize(update, context, url)
         elif kind == "add_interest":
             await self._do_add_interest(update, account_id, text.strip())
+        elif kind == "add_user_tele_id":
+            if self._is_admin(update, account_id):
+                await self._do_add_user_tele_id(update, text)
         elif kind == "update_interest":
             index = awaiting["payload"]["index"]
             entries = self._interests_for(account_id).list()

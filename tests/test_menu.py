@@ -21,6 +21,11 @@ class MenuTests(AsyncBotTestCase):
     def _unlock(self, b, chat_id, pw):
         b._accounts.try_unlock(chat_id=chat_id, attempt=pw)
 
+    def _admin_bot(self):
+        b = self._make_bot()
+        b._accounts.try_unlock(chat_id=1, attempt="adm")  # amy on chat 1
+        return b
+
     async def test_menu_command_shows_top_level_board(self):
         b = self._make_bot()
         self._unlock(b, self.CHAT_ID, "pw")
@@ -370,3 +375,141 @@ class MenuTests(AsyncBotTestCase):
         await b.handle_plain_text(typed, ctx)
 
         self.assertIn("Interest #1 no longer exists. See /getinterests.", typed.message.replies)
+
+    async def test_admin_getusers_lists(self):
+        b = self._admin_bot()
+        update = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="act:getusers")
+
+        await b.handle_admin_action(update, FakeContext())
+
+        self.assertTrue(update.callback_query.edits or update.message.replies)
+
+    async def test_non_admin_action_rejected(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")  # alice, not admin
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:getusers")
+
+        await b.handle_admin_action(update, FakeContext())
+
+        # No user listing leaked to a non-admin.
+        self.assertNotIn("alice —", "".join(r or "" for r in update.message.replies))
+
+    async def test_adduserteleid_capture_adds(self):
+        b = self._admin_bot()
+        ctx = FakeContext(user_data={"awaiting": {"kind": "add_user_tele_id", "payload": {}}})
+        typed = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, text="424242")
+
+        await b.handle_plain_text(typed, ctx)
+
+        self.assertIn(424242, b._allowlist.ids)
+
+    async def test_remove_user_pick_then_confirm(self):
+        b = self._admin_bot()
+        sel = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="adm_rm:alice")
+        await b.handle_admin_select_remove(sel, FakeContext())
+        d = [b_.callback_data for row in sel.callback_query.last_markup.inline_keyboard for b_ in row]
+        self.assertIn("cfm:adm_rm:alice", d)
+
+        yes = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="cfm:adm_rm:alice")
+        await b.handle_confirm(yes, FakeContext())
+        self.assertNotIn("alice", b._accounts.list_ids())
+
+    async def test_adduserteleid_action_arms_capture(self):
+        b = self._admin_bot()
+        update = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="act:adduserteleid")
+        ctx = FakeContext()
+
+        await b.handle_admin_action(update, ctx)
+
+        self.assertEqual(ctx.user_data["awaiting"], {"kind": "add_user_tele_id", "payload": {}})
+        self.assertIn("Send the Telegram user id to allow:", update.callback_query.last_text)
+
+    async def test_adduserteleid_capture_stale_slot_ignored_for_non_admin(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")  # alice, not admin
+        ctx = FakeContext(user_data={"awaiting": {"kind": "add_user_tele_id", "payload": {}}})
+        typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="999999")
+
+        await b.handle_plain_text(typed, ctx)
+
+        self.assertNotIn(999999, b._allowlist.ids)
+
+    async def test_locked_user_admin_action_is_rejected(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:getusers")
+
+        await b.handle_admin_action(update, FakeContext())
+
+        self.assertTrue(update.callback_query.answers)  # query.answer() was still called
+        self.assertIsNone(update.callback_query.last_text)
+
+    async def test_adduserteleid_capture_rejects_non_numeric(self):
+        b = self._admin_bot()
+        ctx = FakeContext(user_data={"awaiting": {"kind": "add_user_tele_id", "payload": {}}})
+        typed = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, text="not-a-number")
+
+        await b.handle_plain_text(typed, ctx)
+
+        self.assertIn("That isn't a numeric Telegram user id.", typed.message.replies)
+
+    async def test_admin_pick_remove_lists_removable_accounts(self):
+        b = self._admin_bot()
+        update = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="adm_pick_rm")
+
+        await b.handle_admin_pick_remove(update, FakeContext())
+
+        d = [b_.callback_data for row in update.callback_query.last_markup.inline_keyboard for b_ in row]
+        self.assertIn("adm_rm:alice", d)
+        self.assertNotIn("adm_rm:amy", d)  # admin account excluded
+
+    async def test_admin_pick_remove_with_none_left(self):
+        b = self._admin_bot()
+        b._accounts.remove_account("alice")
+        update = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="adm_pick_rm")
+
+        await b.handle_admin_pick_remove(update, FakeContext())
+
+        self.assertEqual(update.callback_query.last_text, "No removable accounts.")
+
+    async def test_non_admin_pick_remove_rejected(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")  # alice, not admin
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="adm_pick_rm")
+
+        await b.handle_admin_pick_remove(update, FakeContext())
+
+        self.assertTrue(update.callback_query.answers)
+        self.assertIsNone(update.callback_query.last_text)
+
+    async def test_non_admin_select_remove_rejected(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")  # alice, not admin
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="adm_rm:alice")
+
+        await b.handle_admin_select_remove(update, FakeContext())
+
+        self.assertTrue(update.callback_query.answers)
+        self.assertIsNone(update.callback_query.last_text)
+        self.assertIn("alice", b._accounts.list_ids())  # untouched
+
+    async def test_confirm_refuses_to_remove_admin_account(self):
+        b = self._admin_bot()
+        yes = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="cfm:adm_rm:amy")
+
+        await b.handle_confirm(yes, FakeContext())
+
+        self.assertIn("amy", b._accounts.list_ids())
+        self.assertIn("Refusing to remove the admin account.", yes.message.replies)
+
+    async def test_confirm_adm_rm_rechecks_admin(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")  # alice, not admin
+        yes = FakeUpdate(
+            user_id=self.USER, chat_id=self.CHAT_ID, callback_data="cfm:adm_rm:alice"
+        )
+
+        await b.handle_confirm(yes, FakeContext())
+
+        # alice is unlocked on this very chat, but not admin — must not be
+        # able to remove herself (or anyone) via a forged confirm token.
+        self.assertIn("alice", b._accounts.list_ids())
