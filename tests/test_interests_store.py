@@ -10,6 +10,23 @@ class InterestsStoreTests(BotTestCase):
         self.assertEqual(store.add("formula 1"), 2)
         self.assertEqual(store.list(), ["cybersecurity", "formula 1"])
 
+    def test_remove_deletes_and_returns_the_entry(self):
+        store = bot.InterestsStore(self.tmp_path / "interests.md")
+        store.add("cybersecurity")
+        store.add("formula 1")
+        store.add("anime")
+
+        self.assertEqual(store.remove(2), "formula 1")
+        self.assertEqual(store.list(), ["cybersecurity", "anime"])
+
+    def test_remove_out_of_range_returns_none_and_keeps_list(self):
+        store = bot.InterestsStore(self.tmp_path / "interests.md")
+        store.add("only one")
+
+        self.assertIsNone(store.remove(5))
+        self.assertIsNone(store.remove(0))
+        self.assertEqual(store.list(), ["only one"])
+
     def test_add_normalizes_internal_whitespace(self):
         store = bot.InterestsStore(self.tmp_path / "interests.md")
 

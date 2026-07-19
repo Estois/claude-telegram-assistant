@@ -108,33 +108,53 @@ class YKBot:
             CommandSpec(
                 "news", "/news <subject>",
                 "news digest on a subject, biased toward your interests", self.handle_news,
+                category="News",
+            ),
+            CommandSpec(
+                "summarize", "/summarize <url>",
+                "summarize a web page", self.handle_summarize,
+                category="Tools",
             ),
             CommandSpec(
                 "addinterests", "/addinterests <topic>",
                 "add an interest (word, sentence, or paragraph)", self.handle_add_interests,
+                category="Interests",
             ),
             CommandSpec(
                 "getinterests", "/getinterests",
                 "list your interests with their index", self.handle_get_interests,
+                category="Interests",
             ),
             CommandSpec(
                 "updateinterests", "/updateinterests <index> <topic>",
                 "revise or rewrite an interest (Claude decides which)", self.handle_update_interests,
+                category="Interests",
+            ),
+            CommandSpec(
+                "removeinterest", "/removeinterest <index>",
+                "delete an interest by its index", self.handle_remove_interest,
+                category="Interests",
             ),
             CommandSpec(
                 "compileinterests", "/compileinterests",
                 "merge duplicate interests and add retrieval detail now (runs automatically too)",
                 self.handle_compile_interests,
+                category="Interests",
             ),
             CommandSpec(
                 "bus", "/bus",
                 "bus arrival times, from a preset stop or your live location", self.handle_bus,
+                category="Bus",
             ),
             CommandSpec(
                 "endsession", "/endsession",
                 "end the current session now", self.handle_end_session,
+                category="Account",
             ),
-            CommandSpec("help", "/help", "show this message", self.handle_help),
+            CommandSpec(
+                "help", "/help", "show this message", self.handle_help,
+                category="Account",
+            ),
             CommandSpec(
                 "adduser", "/adduser <name> <sha256hash>",
                 "create an account, or add a password to an existing one", self.handle_add_user,
@@ -158,11 +178,17 @@ class YKBot:
         ]
 
     def _build_command_list(self, admin: bool = False) -> str:
-        lines = [
-            f"{spec.usage} — {spec.description}"
-            for spec in self._command_specs
-            if not spec.admin_only
-        ]
+        """The full command reference, grouped by category. Categories appear
+        in the order their first command is defined, so /help stays scannable
+        as commands are added."""
+        groups: dict = {}
+        for spec in self._command_specs:
+            if spec.admin_only:
+                continue
+            groups.setdefault(spec.category, []).append(f"{spec.usage} — {spec.description}")
+        sections = []
+        for category, entries in groups.items():
+            sections.append(f"{category}:\n" + "\n".join(entries))
         if admin:
             admin_lines = [
                 f"{spec.usage} — {spec.description}"
@@ -170,8 +196,8 @@ class YKBot:
                 if spec.admin_only
             ]
             if admin_lines:
-                lines += ["", "Admin commands:"] + admin_lines
-        return "\n".join(lines)
+                sections.append("Admin:\n" + "\n".join(admin_lines))
+        return "\n\n".join(sections)
 
     def _build_help_text(self, admin: bool = False) -> str:
         minutes = self._config.session_timeout_seconds // 60
@@ -179,14 +205,16 @@ class YKBot:
             "Every command needs an unlocked session — send the password as a plain "
             f"message first (lasts {minutes} minutes). Interests and preferred bus "
             "stops belong to whichever account your password unlocked.\n\n"
-            "Commands:\n" + self._build_command_list(admin)
+            + self._build_command_list(admin)
         )
 
-    def _build_welcome_text(self, name: str, admin: bool = False) -> str:
+    def _build_welcome_text(self, name: str) -> str:
+        """Deliberately short and constant-size — the full command list lives
+        in /help, so adding commands never clutters this greeting."""
         minutes = self._config.session_timeout_seconds // 60
         return (
             f"👋 Welcome, {name}! Session active for {minutes} minutes.\n\n"
-            "Commands:\n" + self._build_command_list(admin) + "\n\n"
+            "Send /help to see everything I can do.\n\n"
             "Anything I don't recognize — an unknown command, or any plain message — "
             "gets you a random animal fact instead of an error, just for fun."
         )
@@ -330,6 +358,21 @@ class YKBot:
         )
 
     @staticmethod
+    def _build_summarize_prompt(url: str) -> str:
+        return (
+            f"Fetch the web page at {url} and write a concise summary of its main "
+            "points — the key takeaways someone would want without reading the whole "
+            "page. If the page can't be fetched or has no readable content, say so "
+            "briefly instead of guessing. Output ONLY the summary, no preamble or "
+            "meta-commentary. "
+            "Format it for a Telegram message using only these HTML tags: <b>, <i>, <u>, "
+            '<s>, <code>, <pre>, and <a href="URL">text</a>. Do not use Markdown syntax '
+            "(no **, no #, no [text](url)). Use short paragraphs and simple bullet points "
+            "(•) for scanability. Escape any literal <, >, or & characters that aren't part "
+            "of a tag."
+        )
+
+    @staticmethod
     def _strip_news_preamble(reply: str) -> str:
         """Drop any preamble the model emits before the digest header.
 
@@ -425,10 +468,58 @@ class YKBot:
                 # Logging the subject must never break the digest reply.
                 logger.exception("Failed to log /news subject for %s", account_id)
         reply = await self._run_claude(
-            update, context, self._build_news_prompt(subject, account_id), web_search=True
+            update, context, self._build_news_prompt(subject, account_id), web_tools=True
         )
         if reply is not None:
             await self._send_formatted(update, self._strip_news_preamble(reply))
+
+    async def handle_summarize(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        account_id = await self._require_session(update)
+        if account_id is None:
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: /summarize <url>\nExample: /summarize https://example.com/article"
+            )
+            return
+
+        url = context.args[0]
+        if not self._is_fetchable_url(url):
+            await update.message.reply_text(
+                "Please give a single public http(s) URL to summarize."
+            )
+            return
+
+        reply = await self._run_claude(
+            update, context, self._build_summarize_prompt(url), web_tools=True
+        )
+        if reply is not None:
+            await self._send_formatted(update, reply)
+
+    @staticmethod
+    def _is_fetchable_url(url: str) -> bool:
+        """A public http(s) URL. Rejects non-http(s) schemes and hosts that
+        point at the local machine / private networks / cloud metadata, so an
+        authenticated user can't turn /summarize into an SSRF probe of
+        internal services on the host."""
+        match = re.match(r"^https?://(\[[^\]]+\]|[^/:\s]+)", url, re.IGNORECASE)
+        if not match:
+            return False
+        host = match.group(1).lower().rstrip(".")
+        if host.startswith("[") and host.endswith("]"):
+            host = host[1:-1]  # unwrap [IPv6]
+        if host in ("localhost",) or host.endswith(".localhost") or host.endswith(".internal"):
+            return False
+        # Block cloud metadata + IPv6 loopback/link-local/unique-local +
+        # private/loopback/link-local IPv4 ranges. Real domains pass through.
+        if host in ("169.254.169.254", "::1", "::"):
+            return False
+        blocked_prefixes = (
+            "127.", "10.", "169.254.", "192.168.", "fe80", "fc", "fd",
+            *(f"172.{n}." for n in range(16, 32)),
+        )
+        return not host.startswith(blocked_prefixes)
 
     async def handle_add_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -491,6 +582,32 @@ class YKBot:
 
         interests.update(index, new_text)
         await update.message.reply_text(f"Updated interest #{index}.")
+
+    async def handle_remove_interest(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        account_id = await self._require_session(update)
+        if account_id is None:
+            return
+
+        if not context.args or not context.args[0].isdigit():
+            await update.message.reply_text(
+                "Usage: /removeinterest <index>\nExample: /removeinterest 2\n"
+                "See /getinterests for the indices."
+            )
+            return
+
+        index = int(context.args[0])
+        interests = self._interests_for(account_id)
+        if not interests.list():
+            await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
+            return
+
+        removed = interests.remove(index)
+        if removed is None:
+            await update.message.reply_text(
+                f"No interest #{index}. Valid range: 1-{len(interests.list())}. See /getinterests."
+            )
+            return
+        await update.message.reply_text(f'Removed interest #{index}: "{removed}"')
 
     async def handle_compile_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Manual trigger for the same reorganization the background job
@@ -832,8 +949,7 @@ class YKBot:
             except Exception:
                 logger.exception("Failed to delete password message")
             name = update.effective_user.full_name or "there"
-            admin = self._is_admin(update, account_id)
-            await context.bot.send_message(chat_id=chat_id, text=self._build_welcome_text(name, admin))
+            await context.bot.send_message(chat_id=chat_id, text=self._build_welcome_text(name))
             return
 
         # Wrong password (or none configured yet) — record the failure and give
@@ -902,7 +1018,7 @@ class YKBot:
         prompt: str,
         *,
         chat_id: Optional[Union[int, str]] = None,
-        web_search: bool = False,
+        web_tools: bool = False,
     ) -> Optional[str]:
         """Runs prompt through Claude and returns the raw reply. Each call is
         an independent one-shot invocation. Serializes per lock key (the
@@ -926,7 +1042,7 @@ class YKBot:
         async with lock:
             keep_typing = asyncio.create_task(self._keep_typing(context, telegram_chat_id))
             try:
-                return await self._claude.run(prompt, web_search=web_search)
+                return await self._claude.run(prompt, web_tools=web_tools)
             except Exception as exc:
                 logger.exception("claude invocation failed")
                 await self._reply_to_claude_failure(update, exc)

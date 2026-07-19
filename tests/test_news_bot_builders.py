@@ -13,16 +13,24 @@ class YKBotBuilderTests(BotTestCase):
 
         self.assertIn("/news", listing)
         self.assertNotIn("/adduser ", listing)
-        self.assertNotIn("Admin commands:", listing)
+        self.assertNotIn("Admin:", listing)
 
     def test_build_command_list_includes_admin_section_when_admin_true(self):
         news_bot = self._make_bot()
 
         listing = news_bot._build_command_list(admin=True)
 
-        self.assertIn("Admin commands:", listing)
+        self.assertIn("Admin:", listing)
         self.assertIn("/adduser <name> <sha256hash>", listing)
         self.assertIn("/adduserteleid", listing)
+
+    def test_build_command_list_is_grouped_by_category(self):
+        news_bot = self._make_bot()
+
+        listing = news_bot._build_command_list(admin=False)
+
+        for header in ("News:", "Interests:", "Bus:", "Account:", "Tools:"):
+            self.assertIn(header, listing)
 
     def test_build_help_text_reports_correct_session_timeout_minutes(self):
         news_bot = self._make_bot(session_timeout_seconds=1800)
@@ -31,27 +39,16 @@ class YKBotBuilderTests(BotTestCase):
 
         self.assertIn("30 minutes", help_text)
 
-    def test_build_welcome_text_includes_the_given_name(self):
+    def test_welcome_is_short_and_points_to_help(self):
         news_bot = self._make_bot()
 
         welcome = news_bot._build_welcome_text("alice")
 
         self.assertIn("Welcome, alice!", welcome)
-
-    def test_build_welcome_text_excludes_admin_commands_for_non_admin(self):
-        news_bot = self._make_bot()
-
-        welcome = news_bot._build_welcome_text("alice", admin=False)
-
-        self.assertNotIn("Admin commands:", welcome)
-
-    def test_build_welcome_text_includes_admin_commands_for_admin(self):
-        news_bot = self._make_bot()
-
-        welcome = news_bot._build_welcome_text("amy", admin=True)
-
-        self.assertIn("Admin commands:", welcome)
-        self.assertIn("/removeuser", welcome)
+        self.assertIn("/help", welcome)
+        # The full command list stays out of the welcome so it never clutters.
+        self.assertNotIn("/news <subject>", welcome)
+        self.assertNotIn("Admin:", welcome)
 
     def test_maintenance_key_format(self):
         self.assertEqual(bot.YKBot._maintenance_key("amy"), "maintenance:amy")

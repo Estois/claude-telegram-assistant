@@ -40,6 +40,16 @@ class InterestsStore:
         self._write(entries)
         return True
 
+    def remove(self, index: int):
+        """Deletes the entry at the given 1-based index and returns its text,
+        or None if the index is out of range. Remaining entries renumber."""
+        entries = self.list()
+        if not 1 <= index <= len(entries):
+            return None
+        removed = entries.pop(index - 1)
+        self._write(entries)
+        return removed
+
     def replace_all(self, entries: list) -> None:
         """Overwrites the whole list, e.g. after a reorganization pass."""
         self._write([self._normalize(entry) for entry in entries])

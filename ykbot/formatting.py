@@ -52,5 +52,6 @@ class CommandSpec:
     usage: str
     description: str
     handler: Callable
+    category: str = "General"
     admin_only: bool = False
 

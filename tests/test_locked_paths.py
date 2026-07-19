@@ -47,6 +47,18 @@ class LockedPathTests(AsyncBotTestCase):
         await news_bot.handle_end_session(update, FakeContext())
         await self._assert_trivia(update)
 
+    async def test_summarize_locked(self):
+        news_bot = self._make_bot()
+        update = self._update()
+        await news_bot.handle_summarize(update, FakeContext(args=["https://example.com"]))
+        await self._assert_trivia(update)
+
+    async def test_remove_interest_locked(self):
+        news_bot = self._make_bot()
+        update = self._update()
+        await news_bot.handle_remove_interest(update, FakeContext(args=["1"]))
+        await self._assert_trivia(update)
+
     async def test_news_locked(self):
         news_bot = self._make_bot()
         update = self._update()
