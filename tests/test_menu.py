@@ -263,3 +263,110 @@ class MenuTests(AsyncBotTestCase):
         await b.handle_plain_text(typed, ctx)
         self.assertIn("Added as interest #1.", typed.message.replies)
         self.assertIn("weather", b._interests_for("alice").list())
+
+    async def test_pick_rm_lists_interests_as_buttons(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        b._interests_for("alice").add("one")
+        b._interests_for("alice").add("two")
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="int_pick:rm")
+
+        await b.handle_interest_pick(update, FakeContext())
+
+        d = [b_.callback_data for row in update.callback_query.last_markup.inline_keyboard for b_ in row]
+        self.assertIn("int_rm:1", d)
+        self.assertIn("int_rm:2", d)
+
+    async def test_pick_upd_prompts_update_verb(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        b._interests_for("alice").add("one")
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="int_pick:upd")
+
+        await b.handle_interest_pick(update, FakeContext())
+
+        self.assertIn("Pick an interest to update:", update.callback_query.last_text)
+        d = [b_.callback_data for row in update.callback_query.last_markup.inline_keyboard for b_ in row]
+        self.assertIn("int_upd:1", d)
+
+    async def test_pick_with_no_interests_shows_empty_message(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="int_pick:rm")
+
+        await b.handle_interest_pick(update, FakeContext())
+
+        self.assertEqual(update.callback_query.last_text, "No interests saved yet.")
+        d = [b_.callback_data for row in update.callback_query.last_markup.inline_keyboard for b_ in row]
+        self.assertIn("int_pick:rm", d)
+
+    async def test_locked_user_interest_pick_is_rejected(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="int_pick:rm")
+
+        await b.handle_interest_pick(update, FakeContext())
+
+        self.assertTrue(update.callback_query.answers)
+        self.assertIsNone(update.callback_query.last_text)
+
+    async def test_select_rm_then_confirm_deletes(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        b._interests_for("alice").add("doomed")
+        sel = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="int_rm:1")
+        await b.handle_interest_select(sel, FakeContext())
+        d = [b_.callback_data for row in sel.callback_query.last_markup.inline_keyboard for b_ in row]
+        self.assertIn("cfm:int_rm:1", d)
+
+        yes = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="cfm:int_rm:1")
+        await b.handle_confirm(yes, FakeContext())
+        self.assertEqual(b._interests_for("alice").list(), [])
+
+    async def test_select_upd_arms_capture_with_index(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        b._interests_for("alice").add("orig")
+        ctx = FakeContext()
+        sel = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="int_upd:1")
+
+        await b.handle_interest_select(sel, ctx)
+
+        self.assertEqual(ctx.user_data["awaiting"], {"kind": "update_interest", "payload": {"index": 1}})
+        self.assertIn("Send the new text for interest #1", sel.callback_query.last_text)
+
+    async def test_locked_user_interest_select_is_rejected(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="int_rm:1")
+
+        await b.handle_interest_select(update, FakeContext())
+
+        self.assertTrue(update.callback_query.answers)
+        self.assertIsNone(update.callback_query.last_text)
+
+    async def test_update_interest_capture_completes(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        b._interests_for("alice").add("orig")
+
+        async def fake_run_claude(update, context, prompt, **kwargs):
+            return "revised text"
+        b._run_claude = fake_run_claude
+
+        ctx = FakeContext(user_data={"awaiting": {"kind": "update_interest", "payload": {"index": 1}}})
+        typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="new wording")
+
+        await b.handle_plain_text(typed, ctx)
+
+        self.assertIn("Updated interest #1.", typed.message.replies)
+        self.assertEqual(b._interests_for("alice").list(), ["revised text"])
+
+    async def test_update_interest_capture_with_stale_index(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        # No interests saved, so index 1 no longer exists.
+        ctx = FakeContext(user_data={"awaiting": {"kind": "update_interest", "payload": {"index": 1}}})
+        typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="new wording")
+
+        await b.handle_plain_text(typed, ctx)
+
+        self.assertIn("Interest #1 no longer exists. See /getinterests.", typed.message.replies)

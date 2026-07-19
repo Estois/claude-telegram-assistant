@@ -259,6 +259,8 @@ class YKBot:
         app.add_handler(CallbackQueryHandler(
             self.handle_menu_action,
             pattern=r"^act:(getinterests|compile|endsession|news|summarize|addinterest)$"))
+        app.add_handler(CallbackQueryHandler(self.handle_interest_pick, pattern=r"^int_pick:"))
+        app.add_handler(CallbackQueryHandler(self.handle_interest_select, pattern=r"^int_(rm|upd):"))
         app.add_handler(CallbackQueryHandler(self.handle_confirm, pattern=r"^cfm:"))
         app.add_handler(CallbackQueryHandler(self.handle_cancel, pattern=r"^cxl:"))
         app.add_handler(MessageHandler(filters.LOCATION, self.handle_location))
@@ -528,6 +530,49 @@ class YKBot:
                 "Send the interest to add (a word, sentence, or paragraph):"
             )
 
+    async def handle_interest_pick(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        action = query.data.split(":", 1)[1]  # "rm" or "upd"
+        entries = self._interests_for(account_id).list()
+        if not entries:
+            await query.edit_message_text(
+                "No interests saved yet.", reply_markup=menus.interests_keyboard()
+            )
+            return
+        verb = "remove" if action == "rm" else "update"
+        await query.edit_message_text(
+            f"Pick an interest to {verb}:",
+            reply_markup=menus.interest_pick_keyboard(entries, action),
+        )
+
+    async def handle_interest_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        action, index_str = query.data.split(":")[0].split("_")[1], query.data.split(":", 1)[1]
+        index = int(index_str)
+        if action == "rm":
+            entry = self._interests_for(account_id).list()
+            label = entry[index - 1] if 1 <= index <= len(entry) else f"#{index}"
+            await query.edit_message_text(
+                f'Delete interest #{index}: "{label}"?',
+                reply_markup=menus.confirm_keyboard(f"int_rm:{index}"),
+            )
+        else:  # upd
+            context.user_data["awaiting"] = {"kind": "update_interest", "payload": {"index": index}}
+            await query.edit_message_text(
+                f"Send the new text for interest #{index} "
+                "(I'll decide whether to revise or replace it):"
+            )
+
     async def handle_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         account_id = await self._require_session(update)
@@ -539,6 +584,9 @@ class YKBot:
         if token == "endsession":
             self._accounts.lock(update.effective_chat.id)
             await query.edit_message_text("Session ended.")
+        elif token.startswith("int_rm:"):
+            index = int(token.split(":", 1)[1])
+            await self._do_remove_interest(update, account_id, index)
 
     async def handle_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -1174,6 +1222,15 @@ class YKBot:
                 await self._do_summarize(update, context, url)
         elif kind == "add_interest":
             await self._do_add_interest(update, account_id, text.strip())
+        elif kind == "update_interest":
+            index = awaiting["payload"]["index"]
+            entries = self._interests_for(account_id).list()
+            if 1 <= index <= len(entries):
+                await self._do_update_interest(update, context, account_id, index, text.strip())
+            else:
+                await update.effective_message.reply_text(
+                    f"Interest #{index} no longer exists. See /getinterests."
+                )
         return True
 
     async def handle_plain_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
