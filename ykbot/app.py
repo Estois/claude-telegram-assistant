@@ -333,7 +333,7 @@ class YKBot:
         if account_id is None:
             return None
         if not self._is_admin(update, account_id):
-            await update.message.reply_text(self._trivia.next_fact())
+            await update.effective_message.reply_text(self._trivia.next_fact())
             return None
         return account_id
 

@@ -1,5 +1,7 @@
 import bot
-from tests.helpers import AsyncBotTestCase, FakeContext, FakeUpdate, make_config
+from tests.helpers import (
+    AsyncBotTestCase, FakeContext, FakeUpdate, make_config, write_accounts_file,
+)
 
 
 class ClaudeHelpersCallbackSafeTests(AsyncBotTestCase):
@@ -37,3 +39,14 @@ class ClaudeHelpersCallbackSafeTests(AsyncBotTestCase):
             "Still working on your last request — hang on.",
             update.effective_message.replies,
         )
+
+    async def test_require_admin_callback_safe_for_non_admin(self):
+        b = self._make_bot()
+        write_accounts_file(b._config.accounts_file, {"alice": ["pw"], "amy": ["adm"]})
+        chat_id = 9
+        b._accounts.try_unlock(chat_id=chat_id, attempt="pw")  # alice account, non-admin
+        update = FakeUpdate(user_id=100, chat_id=chat_id)
+        update.message = None  # simulate a real callback-query update
+        result = await b._require_admin(update)
+        self.assertIsNone(result)  # rejected
+        self.assertTrue(update.effective_message.replies)  # replied, did not crash
