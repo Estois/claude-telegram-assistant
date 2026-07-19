@@ -14,7 +14,7 @@ class NewsCaptureTests(AsyncBotTestCase):
         write_accounts_file(news_bot._config.accounts_file, {"alice": ["hunter2"]})
         news_bot._accounts.try_unlock(chat_id=1, attempt="hunter2")
 
-        async def fake_run_claude(update, context, prompt):
+        async def fake_run_claude(update, context, prompt, **kwargs):
             return None  # skip the real Claude subprocess
 
         news_bot._run_claude = fake_run_claude

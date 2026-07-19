@@ -149,7 +149,7 @@ class RunClaudeTests(HandlerTestBase):
     async def test_success_returns_claude_reply(self):
         news_bot = self._make_bot()
 
-        async def fake_run(prompt):
+        async def fake_run(prompt, web_search=False):
             return "the answer"
 
         news_bot._claude.run = fake_run
@@ -162,7 +162,7 @@ class RunClaudeTests(HandlerTestBase):
     async def test_failure_replies_and_returns_none(self):
         news_bot = self._make_bot()
 
-        async def boom(prompt):
+        async def boom(prompt, web_search=False):
             raise RuntimeError("kaboom")
 
         news_bot._claude.run = boom
@@ -171,7 +171,8 @@ class RunClaudeTests(HandlerTestBase):
         result = await news_bot._run_claude(update, FakeContext(), "prompt")
 
         self.assertIsNone(result)
-        self.assertIn("Something went wrong: kaboom", update.message.replies[0])
+        self.assertIn("went wrong", update.message.replies[0].lower())
+        self.assertNotIn("kaboom", update.message.replies[0])
 
 
 class ClaudeFailureReplyTests(HandlerTestBase):
@@ -191,7 +192,8 @@ class ClaudeFailureReplyTests(HandlerTestBase):
 
         await news_bot._reply_to_claude_failure(update, RuntimeError("disk full"))
 
-        self.assertEqual(update.message.replies, ["Something went wrong: disk full"])
+        self.assertIn("went wrong", update.message.replies[0].lower())
+        self.assertNotIn("disk full", update.message.replies[0])
 
 
 class SendFormattedTests(HandlerTestBase):

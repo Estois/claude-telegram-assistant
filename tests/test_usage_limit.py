@@ -16,7 +16,7 @@ class FakeClaudeClient:
     def lock_for(self, chat_id):
         return asyncio.Lock()
 
-    async def run(self, prompt):
+    async def run(self, prompt, web_search=False):
         if self._exc is not None:
             raise self._exc
         return self._result
@@ -95,7 +95,9 @@ class RunClaudeUsageLimitTests(AsyncBotTestCase):
         reply = await news_bot._run_claude(update, FakeContext(), "some prompt")
 
         self.assertIsNone(reply)
-        self.assertEqual(update.message.replies, ["Something went wrong: network unreachable"])
+        self.assertEqual(len(update.message.replies), 1)
+        self.assertIn("went wrong", update.message.replies[0].lower())
+        self.assertNotIn("network unreachable", update.message.replies[0])
 
     async def test_normal_reply_without_usage_limit_wording_passes_through_unchanged(self):
         news_bot = self._make_bot()

@@ -155,8 +155,10 @@ class AllowlistStore:
 
     Held in memory for immediate effect (so /adduserteleid works without a
     restart) and persisted back to the TELEGRAM_ALLOWED_USER_IDS line in
-    the .env file so it survives one. An empty/unset allowlist means wide
-    open, matching Config.allowed_user_ids' existing meaning.
+    the .env file so it survives one. Fails CLOSED: an empty/unset allowlist
+    allows nobody, so a missing TELEGRAM_ALLOWED_USER_IDS makes the bot
+    ignore everyone rather than exposing it to the whole internet. Set it in
+    .env (with at least your own id) before first run.
     """
 
     def __init__(self, env_file: Path, initial_ids: Optional[frozenset]):
@@ -168,7 +170,7 @@ class AllowlistStore:
         return frozenset(self._ids) if self._ids else None
 
     def is_allowed(self, user_id: int) -> bool:
-        return not self._ids or user_id in self._ids
+        return user_id in self._ids
 
     def add(self, user_id: int) -> bool:
         """Returns True if the id was newly added, False if it was already

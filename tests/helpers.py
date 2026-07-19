@@ -142,7 +142,10 @@ def make_config(tmp_path: Path, **overrides) -> "bot.Config":
     defaults = dict(
         base_dir=tmp_path,
         telegram_token="test-token",
-        allowed_user_ids=None,
+        # The allowlist fails closed in production; default the test config to
+        # allow the ids the suite uses so tests aren't all silently blocked.
+        # Tests that exercise authorization pass their own allowed_user_ids.
+        allowed_user_ids=frozenset(range(0, 1000)) | {12345, 111111, 100000001},
         env_file=tmp_path / ".env",
         admin_account_id="amy",
         admin_telegram_user_id=100000001,

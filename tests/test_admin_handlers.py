@@ -63,10 +63,9 @@ class AdminHandlerTests(AsyncBotTestCase):
 
     async def test_adduserteleid_adds_then_reports_already_allowed(self):
         news_bot = self._make_bot()
-        # The admin adds its OWN id: once the allowlist is non-empty it gates
-        # everyone, so adding a different id here would lock the admin out and
-        # the second call would be silently rejected.
-        arg = [str(self.ADMIN_UID)]
+        # Add a fresh id not already on the allowlist; the admin (999) stays
+        # allowed throughout, so the second call still reaches the handler.
+        arg = ["424242"]
 
         update1 = self._admin_update()
         await news_bot.handle_add_user_tele_id(update1, FakeContext(args=arg))

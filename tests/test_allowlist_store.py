@@ -3,11 +3,12 @@ from tests.helpers import BotTestCase
 
 
 class AllowlistStoreTests(BotTestCase):
-    def test_is_allowed_is_wide_open_when_no_initial_ids(self):
+    def test_is_allowed_fails_closed_when_no_initial_ids(self):
+        # Security: an unset allowlist must deny everyone, not open the bot up.
         store = bot.AllowlistStore(self.tmp_path / ".env", initial_ids=None)
 
-        self.assertTrue(store.is_allowed(12345))
-        self.assertTrue(store.is_allowed(1))
+        self.assertFalse(store.is_allowed(12345))
+        self.assertFalse(store.is_allowed(1))
 
     def test_is_allowed_true_for_id_in_initial_set(self):
         store = bot.AllowlistStore(self.tmp_path / ".env", initial_ids=frozenset({111, 222}))

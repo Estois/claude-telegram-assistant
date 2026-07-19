@@ -28,6 +28,14 @@ class RunAndBuildTests(BotTestCase):
 
         self.assertTrue(started["polled"])
 
+    def test_warns_when_allowlist_unset(self):
+        news_bot = bot.YKBot(make_config(self.tmp_path, allowed_user_ids=None))
+
+        with self.assertLogs("ykbot", level="WARNING") as captured:
+            news_bot._warn_about_missing_config()
+
+        self.assertTrue(any("TELEGRAM_ALLOWED_USER_IDS" in m for m in captured.output))
+
     def test_build_application_registers_handlers(self):
         news_bot = bot.YKBot(make_config(self.tmp_path))
 

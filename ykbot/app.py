@@ -226,9 +226,9 @@ class YKBot:
     def _warn_about_missing_config(self) -> None:
         if self._allowlist.ids is None:
             logger.warning(
-                "TELEGRAM_ALLOWED_USER_IDS is not set - anyone who messages this bot can run "
-                "Claude Code with permission checks bypassed (%s). Set it before exposing this bot.",
-                self._config.claude_permission_mode,
+                "TELEGRAM_ALLOWED_USER_IDS is not set — the allowlist fails closed, so the "
+                "bot will ignore EVERY message until you add at least your own Telegram user "
+                "id to it in .env."
             )
         if not self._accounts.is_configured:
             logger.warning(
@@ -293,12 +293,19 @@ class YKBot:
         return account_id
 
     def _build_news_prompt(self, subject: str, account_id: str) -> str:
-        interests_file = self._account_dir(account_id) / self.INTERESTS_FILENAME
+        interests = self._interests_for(account_id).list()
+        if interests:
+            interests_block = (
+                "For context, here are my personal interests (do not mention this list, "
+                "its contents, or whether it is empty anywhere in your reply):\n"
+                + "\n".join(f"- {entry}" for entry in interests)
+                + "\n\n"
+            )
+        else:
+            interests_block = ""
         return (
-            f"Silently read {interests_file} for context on my personal interests — "
-            "do not mention this file, its contents, or whether it has been filled in "
-            "anywhere in your reply. "
-            f'Write a news digest about "{subject}", covering the most significant recent '
+            interests_block
+            + f'Write a news digest about "{subject}", covering the most significant recent '
             "developments, biased toward my documented interests where they're relevant to "
             "this subject (don't force a connection that isn't there). "
             "Take extra care with sourcing: only use information you can verify against "
@@ -417,7 +424,9 @@ class YKBot:
             except Exception:
                 # Logging the subject must never break the digest reply.
                 logger.exception("Failed to log /news subject for %s", account_id)
-        reply = await self._run_claude(update, context, self._build_news_prompt(subject, account_id))
+        reply = await self._run_claude(
+            update, context, self._build_news_prompt(subject, account_id), web_search=True
+        )
         if reply is not None:
             await self._send_formatted(update, self._strip_news_preamble(reply))
 
@@ -871,7 +880,11 @@ class YKBot:
         if reset_notice is not None:
             await update.message.reply_text(self._build_usage_limit_message(reset_notice))
         else:
-            await update.message.reply_text(f"Something went wrong: {exc}")
+            # Don't leak CLI stderr / internal paths to the user — the full
+            # exception is already logged server-side in _run_claude.
+            await update.message.reply_text(
+                "⚠️ Something went wrong reaching Claude. Please try again in a bit."
+            )
 
     async def _run_claude(
         self,
@@ -880,6 +893,7 @@ class YKBot:
         prompt: str,
         *,
         chat_id: Optional[Union[int, str]] = None,
+        web_search: bool = False,
     ) -> Optional[str]:
         """Runs prompt through Claude and returns the raw reply. Each call is
         an independent one-shot invocation. Serializes per lock key (the
@@ -903,7 +917,7 @@ class YKBot:
         async with lock:
             keep_typing = asyncio.create_task(self._keep_typing(context, telegram_chat_id))
             try:
-                return await self._claude.run(prompt)
+                return await self._claude.run(prompt, web_search=web_search)
             except Exception as exc:
                 logger.exception("claude invocation failed")
                 await self._reply_to_claude_failure(update, exc)

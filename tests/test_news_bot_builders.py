@@ -56,6 +56,15 @@ class YKBotBuilderTests(BotTestCase):
     def test_maintenance_key_format(self):
         self.assertEqual(bot.YKBot._maintenance_key("amy"), "maintenance:amy")
 
+    def test_news_prompt_injects_interests_when_present(self):
+        news_bot = self._make_bot()
+        news_bot._interests_for("alice").add("cybersecurity")
+
+        prompt = news_bot._build_news_prompt("tokyo", "alice")
+
+        self.assertIn("cybersecurity", prompt)
+        self.assertIn("personal interests", prompt)
+
     def test_news_prompt_requires_dates_reputable_sources_and_verification(self):
         news_bot = self._make_bot()
 

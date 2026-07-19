@@ -391,13 +391,20 @@ Optional environment variables (see `.env.example`):
 
 ## Security
 
-Telegram messages arrive with no TTY attached, so Claude can't interactively
-ask "may I run this tool?" — a prompt would just hang forever. The bot works
-around this by running Claude with `--permission-mode bypassPermissions`,
-which skips all tool-permission checks (file edits, shell commands, network
-requests, everything).
+**Claude runs with no host access.** Every `claude -p` call is launched with
+`--tools` restricted to a hard allowlist — only `WebSearch`/`WebFetch` for
+`/news`, and *no tools at all* for the interest commands. `Bash`, `Read`,
+`Write`, and `Edit` are never available, so a prompt injection (via a `/news`
+subject, an interest entry, etc.) cannot be turned into file access or shell
+commands on the machine. (`--tools` limits tool *availability* even under
+`--permission-mode bypassPermissions`, which only bypasses the interactive
+approval prompt that a TTY-less Telegram session can't answer.)
 
-That makes the `TELEGRAM_ALLOWED_USER_IDS` allowlist load-bearing, not
-optional: anyone who can message the bot can get Claude to run arbitrary
-commands on this machine. The bot logs a warning and runs wide open if the
-allowlist is unset. Only add user IDs you trust.
+**The allowlist fails closed.** `TELEGRAM_ALLOWED_USER_IDS` is required: if it
+is unset the bot ignores *every* message (and logs a warning) rather than
+exposing itself to anyone. Set it in `.env` with at least your own Telegram
+user id before first run, and only add user IDs you trust.
+
+**Errors aren't echoed.** Claude/CLI failures are logged server-side; the user
+just gets a generic "something went wrong" reply, so internal paths and stderr
+never leak into the chat.

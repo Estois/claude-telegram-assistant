@@ -24,9 +24,13 @@ class ClaudeClient:
     def lock_for(self, chat_id: Union[int, str]) -> asyncio.Lock:
         return self._locks.setdefault(chat_id, asyncio.Lock())
 
-    async def run(self, prompt: str) -> str:
-        cmd = self._build_command(prompt)
-        logger.info("Running claude (model=%s)", self._config.claude_model or "default")
+    async def run(self, prompt: str, *, web_search: bool = False) -> str:
+        cmd = self._build_command(prompt, web_search)
+        logger.info(
+            "Running claude (model=%s, web_search=%s)",
+            self._config.claude_model or "default",
+            web_search,
+        )
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -49,7 +53,7 @@ class ClaudeClient:
 
         return stdout.decode(errors="replace").strip()
 
-    def _build_command(self, prompt: str) -> list:
+    def _build_command(self, prompt: str, web_search: bool) -> list:
         cmd = [
             self._config.claude_bin,
             "-p",
@@ -61,4 +65,12 @@ class ClaudeClient:
         ]
         if self._config.claude_model:
             cmd += ["--model", self._config.claude_model]
+        # Security boundary: restrict which built-in tools exist for this run.
+        # `--permission-mode bypassPermissions` bypasses the allow/deny lists,
+        # but `--tools` limits *availability* even under bypass (verified), so
+        # Bash/Read/Write/Edit are never reachable. /news gets web search;
+        # every other command gets no tools at all. This keeps a prompt-
+        # injection from turning the bot into arbitrary host access. `--tools`
+        # is variadic, so it must stay last on the command line.
+        cmd += ["--tools", "WebSearch", "WebFetch"] if web_search else ["--tools", ""]
         return cmd
