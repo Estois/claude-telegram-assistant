@@ -130,3 +130,73 @@ class MenuTests(AsyncBotTestCase):
         # A locked user still gets a trivia reply via _require_session (no
         # reply_markup kwarg) — the fav-menu keyboard must not appear.
         self.assertFalse(any(update.message.replies_markup))
+
+    async def test_action_getinterests_lists(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        b._interests_for("alice").add("weather")
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:getinterests")
+
+        await b.handle_menu_action(update, FakeContext())
+
+        self.assertIn("weather", update.message.replies[-1])
+
+    async def test_action_compile_reports_need_more_interests(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:compile")
+
+        await b.handle_menu_action(update, FakeContext())
+
+        self.assertIn("Need at least 2 interests", update.message.replies[-1])
+
+    async def test_endsession_asks_confirm_then_locks(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        confirm = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:endsession")
+        await b.handle_menu_action(confirm, FakeContext())
+        self.assertIn("cfm:endsession",
+                      [b_.callback_data for row in confirm.callback_query.last_markup.inline_keyboard for b_ in row])
+
+        yes = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="cfm:endsession")
+        await b.handle_confirm(yes, FakeContext())
+        self.assertIsNone(b._accounts.account_for(self.CHAT_ID))
+
+    async def test_cancel_dismisses(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="cxl:endsession")
+
+        await b.handle_cancel(update, FakeContext())
+
+        self.assertIsNotNone(b._accounts.account_for(self.CHAT_ID))  # still unlocked
+        self.assertTrue(update.callback_query.edits)
+
+    async def test_locked_user_menu_action_is_rejected(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:getinterests")
+
+        await b.handle_menu_action(update, FakeContext())
+
+        self.assertTrue(update.callback_query.answers)  # query.answer() was still called
+        # A locked user still gets a trivia reply via _require_session (no
+        # reply_markup kwarg) — no real interests listing must appear.
+        self.assertFalse(any(update.message.replies_markup))
+
+    async def test_locked_user_confirm_is_rejected(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="cfm:endsession")
+
+        await b.handle_confirm(update, FakeContext())
+
+        self.assertTrue(update.callback_query.answers)  # query.answer() was still called
+        self.assertIsNone(update.callback_query.last_text)
+
+    async def test_locked_user_cancel_is_rejected(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="cxl:endsession")
+
+        await b.handle_cancel(update, FakeContext())
+
+        self.assertTrue(update.callback_query.answers)  # query.answer() was still called
+        self.assertIsNone(update.callback_query.last_text)

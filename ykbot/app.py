@@ -256,6 +256,10 @@ class YKBot:
         )
         app.add_handler(CallbackQueryHandler(self.handle_menu_nav, pattern=r"^menu:"))
         app.add_handler(CallbackQueryHandler(self.handle_menu_bus, pattern=r"^act:bus$"))
+        app.add_handler(CallbackQueryHandler(
+            self.handle_menu_action, pattern=r"^act:(getinterests|compile|endsession)$"))
+        app.add_handler(CallbackQueryHandler(self.handle_confirm, pattern=r"^cfm:"))
+        app.add_handler(CallbackQueryHandler(self.handle_cancel, pattern=r"^cxl:"))
         app.add_handler(MessageHandler(filters.LOCATION, self.handle_location))
         app.add_handler(MessageHandler(filters.COMMAND, self.handle_unknown_command))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_plain_text))
@@ -494,6 +498,43 @@ class YKBot:
             return
         await query.answer()
         await self._open_bus_menu(update, context, account_id)
+
+    async def handle_menu_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        action = query.data.split(":", 1)[1]
+        if action == "getinterests":
+            await self._do_show_interests(update, account_id)
+        elif action == "compile":
+            await self._do_compile_interests(update, context, account_id)
+        elif action == "endsession":
+            await query.edit_message_text(
+                "End your session now?", reply_markup=menus.confirm_keyboard("endsession")
+            )
+
+    async def handle_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        token = query.data.split(":", 1)[1]
+        if token == "endsession":
+            self._accounts.lock(update.effective_chat.id)
+            await query.edit_message_text("Session ended.")
+
+    async def handle_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if await self._require_session(update) is None:
+            await query.answer()
+            return
+        await query.answer()
+        await query.edit_message_text("Cancelled.")
 
     async def handle_end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._require_session(update) is None:
