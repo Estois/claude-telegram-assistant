@@ -154,6 +154,98 @@ class BackTests(_BusBotMixin, AsyncBotTestCase):
         self.assertIn("bus_request_location", callback_datas(update.callback_query.last_markup))
 
 
+class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
+    def test_confirm_keyboard_has_add_and_cancel(self):
+        news_bot = self._make_bot()
+
+        datas = callback_datas(news_bot._build_add_confirm_keyboard("46009"))
+
+        self.assertIn("bus_confirmadd:46009", datas)
+        self.assertIn("bus_cancel_add", datas)
+
+    def test_bus_menu_has_add_by_code_button(self):
+        news_bot = self._make_bot()
+
+        _, markup = news_bot._build_fav_menu("alice")
+
+        self.assertIn("bus_addbycode", callback_datas(markup))
+
+    async def test_add_by_code_button_arms_awaiting_state(self):
+        news_bot = self._make_bot()
+        ctx = FakeContext()
+        update = self._update(callback_data="bus_addbycode")
+
+        await news_bot.handle_bus_add_by_code(update, ctx)
+
+        self.assertTrue(ctx.user_data.get("awaiting_bus_code"))
+        self.assertIn("code", update.callback_query.last_text.lower())
+
+    async def test_awaiting_code_message_shows_confirmation(self):
+        news_bot = self._make_bot()
+        ctx = FakeContext(user_data={"awaiting_bus_code": True})
+        update = FakeUpdate(user_id=100, chat_id=self.CHAT_ID, text="46009")
+
+        await news_bot.handle_plain_text(update, ctx)
+
+        reply = update.message.replies[0]
+        self.assertIn("Add this stop", reply)
+        self.assertIn("Arrivals for 46009", reply)
+        self.assertFalse(news_bot._bus_locations_for("alice").has_code("46009"))  # not added yet
+        self.assertNotIn("awaiting_bus_code", ctx.user_data)  # one-shot, consumed
+        self.assertEqual(ctx.user_data["bus_menu"], {"kind": "fav"})
+
+    async def test_awaiting_code_non_digit_is_rejected_not_treated_as_password(self):
+        news_bot = self._make_bot()
+        ctx = FakeContext(user_data={"awaiting_bus_code": True})
+        update = FakeUpdate(user_id=100, chat_id=self.CHAT_ID, text="not a code")
+
+        await news_bot.handle_plain_text(update, ctx)
+
+        self.assertIn("doesn't look like a bus stop code", update.message.replies[0])
+
+    async def test_awaiting_code_already_favorited(self):
+        news_bot = self._make_bot()
+        news_bot._bus_locations_for("alice").add("Home", "46009")
+        ctx = FakeContext(user_data={"awaiting_bus_code": True})
+        update = FakeUpdate(user_id=100, chat_id=self.CHAT_ID, text="46009")
+
+        await news_bot.handle_plain_text(update, ctx)
+
+        self.assertIn("already in your preferred", update.message.replies[0])
+
+    async def test_awaiting_code_on_locked_chat_falls_through_to_password(self):
+        news_bot = self._make_bot()  # unlocks chat 7; use a different, locked chat
+        ctx = FakeContext(user_data={"awaiting_bus_code": True})
+        update = FakeUpdate(user_id=100, chat_id=999, text="46009")
+
+        await news_bot.handle_plain_text(update, ctx)
+
+        # Session not active for chat 999 → treated as a (failed) password, not a code.
+        self.assertIn("fact:", update.message.replies[0])
+        self.assertFalse(news_bot._bus_locations_for("alice").has_code("46009"))
+
+    async def test_confirm_adds_the_stop(self):
+        news_bot = self._make_bot()
+        update = self._update(callback_data="bus_confirmadd:46009")
+
+        await news_bot.handle_bus_confirm_add(update, FakeContext())
+
+        self.assertTrue(news_bot._bus_locations_for("alice").has_code("46009"))
+        self.assertTrue(update.callback_query.last_text.startswith("⭐ Added"))
+        datas = callback_datas(update.callback_query.last_markup)
+        self.assertIn("bus_refresh:46009", datas)          # full arrivals keyboard
+        self.assertIn("bus_fav_remove:46009", datas)       # now removable
+
+    async def test_cancel_adds_nothing(self):
+        news_bot = self._make_bot()
+        update = self._update(callback_data="bus_cancel_add")
+
+        await news_bot.handle_bus_cancel_add(update, FakeContext())
+
+        self.assertIn("Cancelled", update.callback_query.last_text)
+        self.assertFalse(news_bot._bus_locations_for("alice").has_code("46009"))
+
+
 if __name__ == "__main__":
     import unittest
 

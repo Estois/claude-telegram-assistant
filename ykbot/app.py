@@ -243,6 +243,9 @@ class YKBot:
         app.add_handler(CallbackQueryHandler(self.handle_bus_back, pattern=r"^bus_back$"))
         app.add_handler(CallbackQueryHandler(self.handle_bus_fav_add, pattern=r"^bus_fav_add:"))
         app.add_handler(CallbackQueryHandler(self.handle_bus_fav_remove, pattern=r"^bus_fav_remove:"))
+        app.add_handler(CallbackQueryHandler(self.handle_bus_confirm_add, pattern=r"^bus_confirmadd:"))
+        app.add_handler(CallbackQueryHandler(self.handle_bus_cancel_add, pattern=r"^bus_cancel_add$"))
+        app.add_handler(CallbackQueryHandler(self.handle_bus_add_by_code, pattern=r"^bus_addbycode$"))
         app.add_handler(
             CallbackQueryHandler(self.handle_bus_request_location, pattern=r"^bus_request_location$")
         )
@@ -743,6 +746,9 @@ class YKBot:
         buttons.append(
             [InlineKeyboardButton("📍 Send my location", callback_data="bus_request_location")]
         )
+        buttons.append(
+            [InlineKeyboardButton("➕ Add a stop by code", callback_data="bus_addbycode")]
+        )
         return "Pick a stop:", InlineKeyboardMarkup(buttons)
 
     def _build_near_menu(self, stops: list) -> "tuple[str, InlineKeyboardMarkup]":
@@ -858,6 +864,80 @@ class YKBot:
             reply_markup=self._build_arrivals_keyboard(stop_code, account_id),
         )
 
+    async def handle_bus_add_by_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """The /bus "➕ Add a stop by code" button. Arms a one-shot state so the
+        user's next plain message is read as a bus-stop code rather than a
+        password attempt (see handle_plain_text)."""
+        query = update.callback_query
+        if await self._require_session(update) is None:
+            await query.answer()
+            return
+        await query.answer()
+        context.user_data["awaiting_bus_code"] = True
+        await query.edit_message_text(
+            "Send me the bus stop's code — the 5-digit number on the sign — and "
+            "I'll show you the stop before adding it to your preferred list."
+        )
+
+    async def _prompt_add_bus_stop(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, account_id: str, raw_code: str
+    ) -> None:
+        """Shows the stop's details + live arrivals for confirmation before
+        adding, so the user can check they entered the right code."""
+        code = raw_code.strip()
+        if not code.isdigit():
+            await update.message.reply_text(
+                "That doesn't look like a bus stop code — it should be just digits "
+                "(e.g. 46009). Open /bus and tap “➕ Add a stop by code” to try again."
+            )
+            return
+        if self._bus_locations_for(account_id).has_code(code):
+            await update.message.reply_text(
+                f'"{self._describe_stop(code)}" is already in your preferred stops.'
+            )
+            return
+
+        # Remember the fav menu as the origin so the arrivals view's Back button
+        # (shown after confirming) has somewhere sensible to return to.
+        context.user_data["bus_menu"] = {"kind": "fav"}
+        text = (
+            "Add this stop to your preferred list?\n\n"
+            f"📍 {self._describe_stop(code)}\n\n"
+            + await self._format_arrivals(code)
+        )
+        await update.message.reply_text(text, reply_markup=self._build_add_confirm_keyboard(code))
+
+    def _build_add_confirm_keyboard(self, stop_code: str) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Add to preferred", callback_data=f"bus_confirmadd:{stop_code}")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="bus_cancel_add")],
+        ])
+
+    async def handle_bus_confirm_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+
+        await query.answer()
+        stop_code = query.data.split(":", 1)[1]
+        name = self._describe_stop(stop_code)
+        self._bus_locations_for(account_id).add(name, stop_code)
+
+        text = await self._render_arrivals(stop_code, prefix=f'⭐ Added "{name}" to preferred stops.\n\n')
+        await query.edit_message_text(
+            text, reply_markup=self._build_arrivals_keyboard(stop_code, account_id)
+        )
+
+    async def handle_bus_cancel_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if await self._require_session(update) is None:
+            await query.answer()
+            return
+        await query.answer()
+        await query.edit_message_text("Cancelled — nothing was added to your preferred stops.")
+
     def _describe_stop(self, stop_code: str) -> str:
         stop = self._bus_stops.find_by_code(stop_code)
         if stop:
@@ -926,12 +1006,24 @@ class YKBot:
         await update.message.reply_text(self._trivia.next_fact())
 
     async def handle_plain_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Non-command text is always treated as a password attempt, never
-        as a prompt to relay to Claude."""
+        """Non-command text is treated as a password attempt, never as a prompt
+        to relay to Claude — except a one-shot bus-code entry armed by the
+        /bus "add a stop by code" button, when the chat is already unlocked."""
         if not self._is_authorized(update):
             return
 
         chat_id = update.effective_chat.id
+
+        # One-shot bus-code capture (armed by handle_bus_add_by_code). Only
+        # honored while the chat is still unlocked; otherwise fall through and
+        # treat the message as a password attempt as usual.
+        if context.user_data.pop("awaiting_bus_code", False):
+            account_id = self._accounts.account_for(chat_id)
+            if account_id is not None:
+                await self._prompt_add_bus_stop(
+                    update, context, account_id, update.message.text or ""
+                )
+                return
 
         # Brute-force throttle: after too many recent failures, ignore attempts
         # (even correct ones) for a cooldown. Reply with trivia either way so a

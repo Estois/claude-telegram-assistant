@@ -24,7 +24,7 @@ whichever account your password unlocked (see Accounts).
 | `/updateinterests <index> <topic>` | Revises the interest at `<index>` — Claude decides whether `<topic>` adds detail to it or replaces it outright |
 | `/removeinterest <index>` | Deletes the interest at `<index>` |
 | `/compileinterests` | Runs the same merge/enrich pass the background job runs periodically, on demand |
-| `/bus` | Bus arrival times — pick a preset stop, or share your location for the nearest ones |
+| `/bus` | Bus arrival times — pick a preset stop, share your location for the nearest ones, or add a stop by code |
 | `/endsession` | Ends the current session immediately, instead of waiting out the timeout |
 | `/help` | Lists all commands, grouped by category |
 
@@ -230,6 +230,15 @@ nearest `BUS_NEARBY_COUNT` stops (default 3) as buttons — bus stops
 usually come in direction-opposite pairs across a road, so picking from a
 short list beats guessing from the single nearest one. Tapping any stop
 button (preset or nearby) fetches and displays live arrivals for it.
+
+The `/bus` menu also has a "➕ Add a stop by code" button, for adding a
+preferred stop you already know the 5-digit code for (without having to be
+near it or navigate to it). Tapping it arms a one-shot capture: your next
+plain message is read as a bus-stop code instead of a password attempt (only
+while your session is unlocked — otherwise it's treated as a password as
+usual). The bot then shows that stop's description and live arrivals with an
+✅ Add / ❌ Cancel confirmation, so you can check you typed the right code
+before it's saved.
 
 The arrivals screen has three buttons. A top row of "🔄 Refresh" — re-fetches
 the arrival timers for the same stop and re-renders the message (a "🔄 Updated

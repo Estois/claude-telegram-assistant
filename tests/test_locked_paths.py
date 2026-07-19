@@ -107,6 +107,27 @@ class LockedPathTests(AsyncBotTestCase):
         await self._assert_trivia(update)
         self.assertEqual(update.callback_query.edits, [])
 
+    async def test_bus_add_by_code_locked_answers_and_gives_trivia(self):
+        news_bot = self._make_bot()
+        update = self._update(callback_data="bus_addbycode")
+        await news_bot.handle_bus_add_by_code(update, FakeContext())
+        await self._assert_trivia(update)
+        self.assertEqual(update.callback_query.edits, [])
+
+    async def test_bus_confirm_add_locked_answers_and_gives_trivia(self):
+        news_bot = self._make_bot()
+        update = self._update(callback_data="bus_confirmadd:46009")
+        await news_bot.handle_bus_confirm_add(update, FakeContext())
+        await self._assert_trivia(update)
+        self.assertEqual(update.callback_query.edits, [])
+
+    async def test_bus_cancel_add_locked_answers_and_gives_trivia(self):
+        news_bot = self._make_bot()
+        update = self._update(callback_data="bus_cancel_add")
+        await news_bot.handle_bus_cancel_add(update, FakeContext())
+        await self._assert_trivia(update)
+        self.assertEqual(update.callback_query.edits, [])
+
     async def test_bus_refresh_locked_answers_and_gives_trivia(self):
         news_bot = self._make_bot()
         update = self._update(callback_data="bus_refresh:46009")
