@@ -52,6 +52,16 @@ class AdminHandlerTests(AsyncBotTestCase):
         self.assertEqual(update.message.replies, ["Created account 'bob' with 1 password."])
         self.assertIn("bob", news_bot._accounts.list_ids())
 
+    async def test_adduser_rejects_a_name_over_32_chars(self):
+        news_bot = self._make_bot()
+        update = self._admin_update()
+        long_name = "a" * 40
+
+        await news_bot.handle_add_user(update, FakeContext(args=[long_name, VALID_HASH]))
+
+        self.assertIn("max 32 characters", update.message.replies[0])
+        self.assertNotIn(long_name, news_bot._accounts.list_ids())
+
     async def test_removeuser_refuses_to_remove_admin_account(self):
         news_bot = self._make_bot()
         update = self._admin_update()

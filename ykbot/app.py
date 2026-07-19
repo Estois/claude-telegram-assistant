@@ -854,9 +854,10 @@ class YKBot:
             return
 
         name, password_hash = context.args
-        if not AccountStore.ACCOUNT_ID_PATTERN.match(name):
+        if not AccountStore.ACCOUNT_ID_PATTERN.match(name) or len(name) > 32:
             await update.message.reply_text(
-                "Name must be letters, digits, - or _ only (it's used as a folder name)."
+                "Name must be letters, digits, - or _ only, max 32 characters "
+                "(it's used as a folder name)."
             )
             return
         if not re.fullmatch(r"[0-9a-fA-F]{64}", password_hash):
