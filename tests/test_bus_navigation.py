@@ -170,19 +170,19 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
 
         self.assertIn("bus_addbycode", callback_datas(markup))
 
-    async def test_add_by_code_button_arms_awaiting_state(self):
+    async def test_add_by_code_arms_awaiting_slot(self):
         news_bot = self._make_bot()
         ctx = FakeContext()
         update = self._update(callback_data="bus_addbycode")
 
         await news_bot.handle_bus_add_by_code(update, ctx)
 
-        self.assertTrue(ctx.user_data.get("awaiting_bus_code"))
+        self.assertEqual(ctx.user_data["awaiting"], {"kind": "bus_code", "payload": {}})
         self.assertIn("code", update.callback_query.last_text.lower())
 
     async def test_awaiting_code_message_shows_confirmation(self):
         news_bot = self._make_bot()
-        ctx = FakeContext(user_data={"awaiting_bus_code": True})
+        ctx = FakeContext(user_data={"awaiting": {"kind": "bus_code", "payload": {}}})
         update = FakeUpdate(user_id=100, chat_id=self.CHAT_ID, text="46009")
 
         await news_bot.handle_plain_text(update, ctx)
@@ -191,12 +191,12 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
         self.assertIn("Add this stop", reply)
         self.assertIn("Arrivals for 46009", reply)
         self.assertFalse(news_bot._bus_locations_for("alice").has_code("46009"))  # not added yet
-        self.assertNotIn("awaiting_bus_code", ctx.user_data)  # one-shot, consumed
+        self.assertNotIn("awaiting", ctx.user_data)  # one-shot, consumed
         self.assertEqual(ctx.user_data["bus_menu"], {"kind": "fav"})
 
     async def test_awaiting_code_non_digit_is_rejected_not_treated_as_password(self):
         news_bot = self._make_bot()
-        ctx = FakeContext(user_data={"awaiting_bus_code": True})
+        ctx = FakeContext(user_data={"awaiting": {"kind": "bus_code", "payload": {}}})
         update = FakeUpdate(user_id=100, chat_id=self.CHAT_ID, text="not a code")
 
         await news_bot.handle_plain_text(update, ctx)
@@ -206,7 +206,7 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
     async def test_awaiting_code_already_favorited(self):
         news_bot = self._make_bot()
         news_bot._bus_locations_for("alice").add("Home", "46009")
-        ctx = FakeContext(user_data={"awaiting_bus_code": True})
+        ctx = FakeContext(user_data={"awaiting": {"kind": "bus_code", "payload": {}}})
         update = FakeUpdate(user_id=100, chat_id=self.CHAT_ID, text="46009")
 
         await news_bot.handle_plain_text(update, ctx)
@@ -215,7 +215,7 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
 
     async def test_awaiting_code_on_locked_chat_falls_through_to_password(self):
         news_bot = self._make_bot()  # unlocks chat 7; use a different, locked chat
-        ctx = FakeContext(user_data={"awaiting_bus_code": True})
+        ctx = FakeContext(user_data={"awaiting": {"kind": "bus_code", "payload": {}}})
         update = FakeUpdate(user_id=100, chat_id=999, text="46009")
 
         await news_bot.handle_plain_text(update, ctx)
@@ -223,6 +223,17 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
         # Session not active for chat 999 → treated as a (failed) password, not a code.
         self.assertIn("fact:", update.message.replies[0])
         self.assertFalse(news_bot._bus_locations_for("alice").has_code("46009"))
+
+    async def test_awaiting_falls_through_to_password_when_locked(self):
+        news_bot = self._make_bot()
+        news_bot._accounts.lock(self.CHAT_ID)  # ensure locked
+        ctx = FakeContext(user_data={"awaiting": {"kind": "bus_code", "payload": {}}})
+        update = FakeUpdate(user_id=100, chat_id=self.CHAT_ID, text="hunter2")
+
+        await news_bot.handle_plain_text(update, ctx)
+
+        # Locked → the text was treated as a (correct) password, not a bus code.
+        self.assertIsNotNone(news_bot._accounts.account_for(self.CHAT_ID))
 
     async def test_confirm_adds_the_stop(self):
         news_bot = self._make_bot()

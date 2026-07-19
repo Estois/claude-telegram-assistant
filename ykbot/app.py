@@ -873,7 +873,7 @@ class YKBot:
             await query.answer()
             return
         await query.answer()
-        context.user_data["awaiting_bus_code"] = True
+        context.user_data["awaiting"] = {"kind": "bus_code", "payload": {}}
         await query.edit_message_text(
             "Send me the bus stop's code — the 5-digit number on the sign — and "
             "I'll show you the stop before adding it to your preferred list."
@@ -1005,6 +1005,23 @@ class YKBot:
         # wrong password — see handle_plain_text.
         await update.message.reply_text(self._trivia.next_fact())
 
+    async def _consume_awaiting(self, update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> bool:
+        """If a text-capture is armed AND the chat is unlocked, handle the
+        text and return True. If locked, clear the slot and return False so
+        the caller treats the message as a password attempt (indistinguishable
+        from a wrong guess — no capture leaks past the lock)."""
+        awaiting = context.user_data.pop("awaiting", None)
+        if not awaiting:
+            return False
+        account_id = self._accounts.account_for(chat_id)
+        if account_id is None:
+            return False  # locked: fall through to the password path
+        text = update.message.text or ""
+        kind = awaiting["kind"]
+        if kind == "bus_code":
+            await self._prompt_add_bus_stop(update, context, account_id, text)
+        return True
+
     async def handle_plain_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Non-command text is treated as a password attempt, never as a prompt
         to relay to Claude — except a one-shot bus-code entry armed by the
@@ -1014,16 +1031,10 @@ class YKBot:
 
         chat_id = update.effective_chat.id
 
-        # One-shot bus-code capture (armed by handle_bus_add_by_code). Only
-        # honored while the chat is still unlocked; otherwise fall through and
-        # treat the message as a password attempt as usual.
-        if context.user_data.pop("awaiting_bus_code", False):
-            account_id = self._accounts.account_for(chat_id)
-            if account_id is not None:
-                await self._prompt_add_bus_stop(
-                    update, context, account_id, update.message.text or ""
-                )
-                return
+        # Text-capture armed by a menu button (bus code, news subject, etc.).
+        # Only consumed while unlocked; otherwise it's a password attempt.
+        if await self._consume_awaiting(update, context, chat_id):
+            return
 
         # Brute-force throttle: after too many recent failures, ignore attempts
         # (even correct ones) for a cooldown. Reply with trivia either way so a
