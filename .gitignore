@@ -13,3 +13,4 @@ message_logs/
 .pytest_cache/
 .coverage
 .claude/
+IDEAS.md
