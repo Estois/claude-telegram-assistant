@@ -1148,11 +1148,11 @@ class YKBot:
     async def _reply_to_claude_failure(self, update: Update, exc: Exception) -> None:
         reset_notice = self._usage_limit_reset_notice(str(exc))
         if reset_notice is not None:
-            await update.message.reply_text(self._build_usage_limit_message(reset_notice))
+            await update.effective_message.reply_text(self._build_usage_limit_message(reset_notice))
         else:
             # Don't leak CLI stderr / internal paths to the user — the full
             # exception is already logged server-side in _run_claude.
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "⚠️ Something went wrong reaching Claude. Please try again in a bit."
             )
 
@@ -1181,7 +1181,7 @@ class YKBot:
 
         lock = self._claude.lock_for(lock_key)
         if lock.locked():
-            await update.message.reply_text("Still working on your last request — hang on.")
+            await update.effective_message.reply_text("Still working on your last request — hang on.")
             return None
 
         async with lock:
@@ -1202,10 +1202,10 @@ class YKBot:
         well-formed, so a broken reply must never mean a lost reply."""
         for chunk in TelegramFormatter.chunk(text):
             try:
-                await update.message.reply_text(chunk, parse_mode=ParseMode.HTML)
+                await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
             except BadRequest:
                 logger.warning("Telegram rejected HTML formatting, sending chunk as plain text")
-                await update.message.reply_text(chunk)
+                await update.effective_message.reply_text(chunk)
 
     @staticmethod
     async def _keep_typing(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
