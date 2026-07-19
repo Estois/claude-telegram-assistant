@@ -301,6 +301,16 @@ class YKBot:
             f'Write a news digest about "{subject}", covering the most significant recent '
             "developments, biased toward my documented interests where they're relevant to "
             "this subject (don't force a connection that isn't there). "
+            "Take extra care with sourcing: only use information you can verify against "
+            "reputable, established sources — major news organizations, official or primary "
+            "sources, and well-known publications. Do NOT rely on blogs, forums, social-media "
+            "posts, content farms, or obscure/unknown sites. Corroborate each item across "
+            "more than one reputable source where you can, and leave out anything you cannot "
+            "verify or that reads like rumor or speculation. "
+            "Label every item with the date it happened or was reported, in (YYYY-MM-DD) "
+            "form. End every item with its source(s) as clickable links in the form "
+            '<a href="URL">Publication</a>; if an item draws on more than one source, list '
+            "them all. "
             "Begin the reply immediately with the digest header line, which MUST start with "
             f'the literal words "News Digest" (for example: <b>News Digest — {subject} — '
             "YYYY-MM-DD</b>). Put NOTHING before that header: no preamble, no lead-in "

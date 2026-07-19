@@ -56,6 +56,17 @@ class YKBotBuilderTests(BotTestCase):
     def test_maintenance_key_format(self):
         self.assertEqual(bot.YKBot._maintenance_key("amy"), "maintenance:amy")
 
+    def test_news_prompt_requires_dates_reputable_sources_and_verification(self):
+        news_bot = self._make_bot()
+
+        prompt = news_bot._build_news_prompt("tokyo", "alice").lower()
+
+        self.assertIn('news digest about "tokyo"', prompt)
+        self.assertIn("reputable", prompt)   # only reputable sites
+        self.assertIn("verify", prompt)      # extra verification effort
+        self.assertIn("date", prompt)        # dates for each item
+        self.assertIn("source", prompt)      # sources embedded per item
+
     def test_strip_news_preamble_removes_text_before_header(self):
         reply = (
             "Now I have enough for the digest, with a natural tie-in.\n\n"
