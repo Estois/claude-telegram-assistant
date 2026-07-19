@@ -200,3 +200,66 @@ class MenuTests(AsyncBotTestCase):
 
         self.assertTrue(update.callback_query.answers)  # query.answer() was still called
         self.assertIsNone(update.callback_query.last_text)
+
+    async def test_news_button_arms_capture_then_core(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+
+        async def fake_do_news(update, context, account_id, subject):
+            update.effective_message.replies.append(f"digest:{subject}")
+        b._do_news = fake_do_news
+
+        arm = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:news")
+        ctx = FakeContext()
+        await b.handle_menu_action(arm, ctx)
+        self.assertEqual(ctx.user_data["awaiting"]["kind"], "news_subject")
+        self.assertIn("Send the subject for your news digest:", arm.callback_query.last_text)
+
+        typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="climate")
+        await b.handle_plain_text(typed, ctx)
+        self.assertIn("digest:climate", typed.message.replies)
+
+    async def test_summarize_button_arms_capture_then_core(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+
+        async def fake_do_summarize(update, context, url):
+            update.effective_message.replies.append(f"summary:{url}")
+        b._do_summarize = fake_do_summarize
+
+        arm = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:summarize")
+        ctx = FakeContext()
+        await b.handle_menu_action(arm, ctx)
+        self.assertEqual(ctx.user_data["awaiting"]["kind"], "summarize_url")
+        self.assertIn("Send the URL to summarize:", arm.callback_query.last_text)
+
+        typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="https://example.com/a")
+        await b.handle_plain_text(typed, ctx)
+        self.assertIn("summary:https://example.com/a", typed.message.replies)
+
+    async def test_summarize_capture_rejects_bad_url(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        ctx = FakeContext(user_data={"awaiting": {"kind": "summarize_url", "payload": {}}})
+        typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="not-a-url")
+
+        await b.handle_plain_text(typed, ctx)
+
+        self.assertTrue(any("public http(s) URL" in r for r in typed.message.replies))
+
+    async def test_addinterest_button_arms_capture_then_core(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+
+        arm = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:addinterest")
+        ctx = FakeContext()
+        await b.handle_menu_action(arm, ctx)
+        self.assertEqual(ctx.user_data["awaiting"]["kind"], "add_interest")
+        self.assertIn(
+            "Send the interest to add (a word, sentence, or paragraph):", arm.callback_query.last_text
+        )
+
+        typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="weather")
+        await b.handle_plain_text(typed, ctx)
+        self.assertIn("Added as interest #1.", typed.message.replies)
+        self.assertIn("weather", b._interests_for("alice").list())

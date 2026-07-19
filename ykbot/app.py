@@ -257,7 +257,8 @@ class YKBot:
         app.add_handler(CallbackQueryHandler(self.handle_menu_nav, pattern=r"^menu:"))
         app.add_handler(CallbackQueryHandler(self.handle_menu_bus, pattern=r"^act:bus$"))
         app.add_handler(CallbackQueryHandler(
-            self.handle_menu_action, pattern=r"^act:(getinterests|compile|endsession)$"))
+            self.handle_menu_action,
+            pattern=r"^act:(getinterests|compile|endsession|news|summarize|addinterest)$"))
         app.add_handler(CallbackQueryHandler(self.handle_confirm, pattern=r"^cfm:"))
         app.add_handler(CallbackQueryHandler(self.handle_cancel, pattern=r"^cxl:"))
         app.add_handler(MessageHandler(filters.LOCATION, self.handle_location))
@@ -514,6 +515,17 @@ class YKBot:
         elif action == "endsession":
             await query.edit_message_text(
                 "End your session now?", reply_markup=menus.confirm_keyboard("endsession")
+            )
+        elif action == "news":
+            context.user_data["awaiting"] = {"kind": "news_subject", "payload": {}}
+            await query.edit_message_text("Send the subject for your news digest:")
+        elif action == "summarize":
+            context.user_data["awaiting"] = {"kind": "summarize_url", "payload": {}}
+            await query.edit_message_text("Send the URL to summarize:")
+        elif action == "addinterest":
+            context.user_data["awaiting"] = {"kind": "add_interest", "payload": {}}
+            await query.edit_message_text(
+                "Send the interest to add (a word, sentence, or paragraph):"
             )
 
     async def handle_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1150,6 +1162,18 @@ class YKBot:
         kind = awaiting["kind"]
         if kind == "bus_code":
             await self._prompt_add_bus_stop(update, context, account_id, text)
+        elif kind == "news_subject":
+            await self._do_news(update, context, account_id, text.strip())
+        elif kind == "summarize_url":
+            url = text.strip()
+            if not self._is_fetchable_url(url):
+                await update.effective_message.reply_text(
+                    "Please give a single public http(s) URL to summarize."
+                )
+            else:
+                await self._do_summarize(update, context, url)
+        elif kind == "add_interest":
+            await self._do_add_interest(update, account_id, text.strip())
         return True
 
     async def handle_plain_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
