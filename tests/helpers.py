@@ -44,12 +44,14 @@ class FakeMessage:
 
     def __init__(self, text=None, message_id=1, location=None):
         self.replies: list = []
+        self.replies_markup: list = []
         self.text = text
         self.message_id = message_id
         self.location = location
 
     async def reply_text(self, text, **kwargs):
         self.replies.append(text)
+        self.replies_markup.append(kwargs.get("reply_markup"))
 
 
 class FakeCallbackQuery:

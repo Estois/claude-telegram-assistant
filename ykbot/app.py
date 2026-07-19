@@ -33,6 +33,7 @@ from ykbot.formatting import CommandSpec, TelegramFormatter
 from ykbot.interests import InterestsStore
 from ykbot.message_log import MessageLogStore
 from ykbot.news_history import NewsHistoryStore
+from ykbot import menus
 from ykbot.trivia import FALLBACK_TRIVIA, TriviaBook
 
 logging.basicConfig(
@@ -105,6 +106,10 @@ class YKBot:
         (_build_command_list) both read from this same list, so a new
         command only needs to be added here once."""
         return [
+            CommandSpec(
+                "menu", "/menu", "show the button menu", self.handle_menu,
+                category="Menu",
+            ),
             CommandSpec(
                 "news", "/news <subject>",
                 "news digest on a subject, biased toward your interests", self.handle_news,
@@ -214,7 +219,7 @@ class YKBot:
         minutes = self._config.session_timeout_seconds // 60
         return (
             f"👋 Welcome, {name}! Session active for {minutes} minutes.\n\n"
-            "Send /help to see everything I can do.\n\n"
+            "Tap a button below to get started, or send /help for the full command list.\n\n"
             "Anything I don't recognize — an unknown command, or any plain message — "
             "gets you a random animal fact instead of an error, just for fun."
         )
@@ -249,6 +254,8 @@ class YKBot:
         app.add_handler(
             CallbackQueryHandler(self.handle_bus_request_location, pattern=r"^bus_request_location$")
         )
+        app.add_handler(CallbackQueryHandler(self.handle_menu_nav, pattern=r"^menu:"))
+        app.add_handler(CallbackQueryHandler(self.handle_menu_bus, pattern=r"^act:bus$"))
         app.add_handler(MessageHandler(filters.LOCATION, self.handle_location))
         app.add_handler(MessageHandler(filters.COMMAND, self.handle_unknown_command))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_plain_text))
@@ -447,6 +454,46 @@ class YKBot:
         if account_id is None:
             return
         await update.message.reply_text(self._build_help_text(self._is_admin(update, account_id)))
+
+    def _menu_markup(self, update: Update, account_id: str) -> InlineKeyboardMarkup:
+        return menus.top_level_keyboard(self._is_admin(update, account_id))
+
+    async def handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        account_id = await self._require_session(update)
+        if account_id is None:
+            return
+        await update.effective_message.reply_text(
+            "What would you like to do?", reply_markup=self._menu_markup(update, account_id)
+        )
+
+    async def handle_menu_nav(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        target = query.data.split(":", 1)[1]
+        if target == "interests":
+            await query.edit_message_text("Interests:", reply_markup=menus.interests_keyboard())
+        elif target == "admin":
+            if not self._is_admin(update, account_id):
+                await query.edit_message_text(self._trivia.next_fact())
+                return
+            await query.edit_message_text("Admin:", reply_markup=menus.admin_keyboard())
+        else:  # root
+            await query.edit_message_text(
+                "What would you like to do?", reply_markup=self._menu_markup(update, account_id)
+            )
+
+    async def handle_menu_bus(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        await self._open_bus_menu(update, context, account_id)
 
     async def handle_end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._require_session(update) is None:
@@ -1094,7 +1141,11 @@ class YKBot:
             except Exception:
                 logger.exception("Failed to delete password message")
             name = update.effective_user.full_name or "there"
-            await context.bot.send_message(chat_id=chat_id, text=self._build_welcome_text(name))
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=self._build_welcome_text(name),
+                reply_markup=menus.top_level_keyboard(self._is_admin(update, account_id)),
+            )
             return
 
         # Wrong password (or none configured yet) — record the failure and give
