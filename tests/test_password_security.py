@@ -74,6 +74,38 @@ class MigrationTests(BotTestCase):
         self.assertEqual(store.account_for(1), "alice")  # unlocked despite write failure
 
 
+class AtomicWriteTests(BotTestCase):
+    def test_accounts_file_written_atomically_with_0600_perms(self):
+        store = bot.AccountStore(self.tmp_path / "accounts.hash", session_timeout_seconds=900)
+
+        store.add_hash("alice", _sha("hunter2"))  # triggers _write_sections
+
+        path = self.tmp_path / "accounts.hash"
+        self.assertEqual(store.list_ids(), ["alice"])
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        # No stray temp file left behind.
+        self.assertEqual([p for p in self.tmp_path.iterdir() if p.name != "accounts.hash"], [])
+
+    def test_env_written_atomically(self):
+        env = self.tmp_path / ".env"
+        store = bot.AllowlistStore(env, initial_ids=frozenset({1}))
+
+        store.add(42)
+
+        self.assertIn("TELEGRAM_ALLOWED_USER_IDS=1,42", env.read_text())
+        self.assertEqual(env.stat().st_mode & 0o777, 0o600)
+        self.assertEqual([p for p in self.tmp_path.iterdir() if p.name != ".env"], [])
+
+    def test_atomic_write_reraises_and_swallows_cleanup_failure(self):
+        from unittest import mock
+
+        target = self.tmp_path / "accounts.hash"
+        with mock.patch("ykbot.accounts.os.replace", side_effect=OSError("replace failed")), \
+             mock.patch("ykbot.accounts.os.unlink", side_effect=OSError("unlink failed")):
+            with self.assertRaises(OSError):
+                accounts._atomic_write_text(target, "data")
+
+
 class ThrottleTests(BotTestCase):
     def _store(self):
         return bot.AccountStore(self.tmp_path / "accounts.hash", session_timeout_seconds=900)

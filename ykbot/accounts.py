@@ -4,11 +4,30 @@ import hashlib
 import hmac
 import os
 import re
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
 
 from ykbot._logging import logger
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write content to path via a temp file + rename, with 0600 perms, so a
+    crash mid-write can't corrupt or truncate the original (accounts.hash /
+    .env both hold auth-critical data)."""
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(content)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 # Password storage. New/migrated passwords use salted scrypt; legacy entries
 # are bare SHA-256 hex and are upgraded to scrypt on first successful unlock.
@@ -217,7 +236,7 @@ class AccountStore:
             blocks.append("\n".join(header))
         for account_id, hashes in sections.items():
             blocks.append("\n".join([f"# account: {account_id}"] + hashes))
-        self._accounts_file.write_text("\n\n".join(blocks) + "\n")
+        _atomic_write_text(self._accounts_file, "\n\n".join(blocks) + "\n")
 
 
 
@@ -256,7 +275,7 @@ class AllowlistStore:
     def _persist(self) -> None:
         ids_line = f"TELEGRAM_ALLOWED_USER_IDS={','.join(str(i) for i in sorted(self._ids))}"
         if not self._env_file.exists():
-            self._env_file.write_text(ids_line + "\n")
+            _atomic_write_text(self._env_file, ids_line + "\n")
             return
 
         lines = self._env_file.read_text().splitlines()
@@ -266,5 +285,5 @@ class AllowlistStore:
                 break
         else:
             lines.append(ids_line)
-        self._env_file.write_text("\n".join(lines) + "\n")
+        _atomic_write_text(self._env_file, "\n".join(lines) + "\n")
 

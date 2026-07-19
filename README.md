@@ -259,7 +259,10 @@ only writes for chats that are **already unlocked**. The unlock message
 itself is still locked at that point, so **password attempts (and wrong
 guesses) are never logged** — consistent with the rest of the bot never
 storing plaintext passwords. Set `MESSAGE_LOGGING_ENABLED=false` to turn the
-feature off, or `MESSAGE_LOGS_DIR` to relocate the folder.
+feature off, or `MESSAGE_LOGS_DIR` to relocate the folder. Each per-user log
+is capped (~1 MB, trimmed to the most recent half) so unbounded input can't
+fill the disk. The bot's own `bot.log` is *not* auto-rotated — if you run the
+bot long-term, point `logrotate` at it (or redirect to `systemd`/`journald`).
 
 ## Setup
 

@@ -6,6 +6,21 @@ class MessageLogStoreTests(BotTestCase):
     def _store(self):
         return bot.MessageLogStore(self.tmp_path / "message_logs")
 
+    def test_oversized_log_is_trimmed_to_the_recent_half(self):
+        store = self._store()
+        store.MAX_BYTES = 2000  # small cap for the test
+        path = self.tmp_path / "message_logs" / "bob.log"
+
+        for i in range(500):
+            store.log("bob", 111, f"message number {i}")
+
+        size = path.stat().st_size
+        self.assertLessEqual(size, store.MAX_BYTES)
+        text = path.read_text()
+        self.assertIn("message number 499", text)  # most recent kept
+        self.assertNotIn("message number 0\n", text)  # oldest dropped
+        self.assertTrue(text.startswith("2"))  # trimmed on a clean line boundary (ISO ts)
+
     def test_logs_to_username_file_with_the_text(self):
         store = self._store()
 
