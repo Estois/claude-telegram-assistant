@@ -29,9 +29,7 @@ async def _raise_timeout(coro, timeout):
 
 class ClaudeRunTests(AsyncBotTestCase):
     def _client(self, **overrides):
-        config = make_config(self.tmp_path, **overrides)
-        self.sessions = bot.ClaudeSessionStore(self.tmp_path / "sessions.json")
-        return bot.ClaudeClient(config, self.sessions)
+        return bot.ClaudeClient(make_config(self.tmp_path, **overrides))
 
     def _patch_exec(self, proc):
         captured = {}
@@ -42,38 +40,27 @@ class ClaudeRunTests(AsyncBotTestCase):
 
         return mock.patch("ykbot.claude.asyncio.create_subprocess_exec", fake_exec), captured
 
-    async def test_success_returns_stripped_stdout_and_persists_session(self):
+    async def test_success_returns_stripped_stdout(self):
         client = self._client()
-        patcher, _ = self._patch_exec(FakeProc(stdout=b"  the digest  \n"))
+        patcher, captured = self._patch_exec(FakeProc(stdout=b"  the digest  \n"))
 
         with patcher:
-            result = await client.run(chat_id=7, prompt="hello")
+            result = await client.run("hello")
 
         self.assertEqual(result, "the digest")
-        self.assertIsNotNone(self.sessions.get(7))  # persisted only after success
+        # Independent one-shot: no session flags on the command line.
+        self.assertNotIn("--resume", captured["cmd"])
+        self.assertNotIn("--session-id", captured["cmd"])
 
-    async def test_nonzero_exit_raises_with_stderr_and_no_session_persisted(self):
+    async def test_nonzero_exit_raises_with_stderr(self):
         client = self._client()
         patcher, _ = self._patch_exec(FakeProc(stderr=b"boom", returncode=1))
 
         with patcher:
             with self.assertRaises(RuntimeError) as ctx:
-                await client.run(chat_id=7, prompt="hello")
+                await client.run("hello")
 
         self.assertIn("boom", str(ctx.exception))
-        self.assertIsNone(self.sessions.get(7))
-
-    async def test_existing_session_is_resumed_and_kept(self):
-        client = self._client()
-        self.sessions.set(7, "existing-session")
-        patcher, captured = self._patch_exec(FakeProc(stdout=b"ok"))
-
-        with patcher:
-            await client.run(chat_id=7, prompt="hello")
-
-        self.assertIn("--resume", captured["cmd"])
-        self.assertIn("existing-session", captured["cmd"])
-        self.assertEqual(self.sessions.get(7), "existing-session")
 
     async def test_timeout_kills_process_and_raises(self):
         client = self._client(claude_timeout_seconds=1)
@@ -82,7 +69,7 @@ class ClaudeRunTests(AsyncBotTestCase):
 
         with patcher, mock.patch("ykbot.claude.asyncio.wait_for", new=_raise_timeout):
             with self.assertRaises(RuntimeError) as ctx:
-                await client.run(chat_id=7, prompt="hello")
+                await client.run("hello")
 
         self.assertIn("timed out", str(ctx.exception))
         self.assertTrue(proc.killed)

@@ -149,7 +149,7 @@ class RunClaudeTests(HandlerTestBase):
     async def test_success_returns_claude_reply(self):
         news_bot = self._make_bot()
 
-        async def fake_run(chat_id, prompt):
+        async def fake_run(prompt):
             return "the answer"
 
         news_bot._claude.run = fake_run
@@ -162,7 +162,7 @@ class RunClaudeTests(HandlerTestBase):
     async def test_failure_replies_and_returns_none(self):
         news_bot = self._make_bot()
 
-        async def boom(chat_id, prompt):
+        async def boom(prompt):
             raise RuntimeError("kaboom")
 
         news_bot._claude.run = boom

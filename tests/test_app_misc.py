@@ -160,7 +160,7 @@ class AppMiscTests(AsyncBotTestCase):
         interests.add("cybersecurity")
         interests.add("cyber security")
 
-        async def fake_run(chat_id, prompt):
+        async def fake_run(prompt):
             return "1. cybersecurity"
 
         news_bot._claude.run = fake_run
@@ -175,7 +175,7 @@ class AppMiscTests(AsyncBotTestCase):
         interests.add("only one")
         calls = {"n": 0}
 
-        async def fake_run(chat_id, prompt):
+        async def fake_run(prompt):
             calls["n"] += 1
             return "1. x"
 

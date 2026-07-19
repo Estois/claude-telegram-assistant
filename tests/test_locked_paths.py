@@ -40,11 +40,6 @@ class LockedPathTests(AsyncBotTestCase):
         await news_bot.handle_help(update, FakeContext())
         await self._assert_trivia(update)
 
-    async def test_clear_claude_memory_locked(self):
-        news_bot = self._make_bot()
-        update = self._update()
-        await news_bot.handle_clear_claude_memory(update, FakeContext())
-        await self._assert_trivia(update)
 
     async def test_end_session_locked(self):
         news_bot = self._make_bot()

@@ -3,7 +3,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-sessions.json
 accounts.hash
 accounts/
 trivia_cache.json

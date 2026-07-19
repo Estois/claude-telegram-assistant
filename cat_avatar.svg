@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%">
+      <stop offset="0%" stop-color="#FFE9C7"/>
+      <stop offset="100%" stop-color="#FFD08A"/>
+    </radialGradient>
+    <linearGradient id="fur" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFB05C"/>
+      <stop offset="100%" stop-color="#F5934A"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="256" cy="256" r="256" fill="url(#bg)"/>
+
+  <!-- ears -->
+  <path d="M126 168 L188 246 L96 258 Z" fill="url(#fur)"/>
+  <path d="M386 168 L324 246 L416 258 Z" fill="url(#fur)"/>
+  <path d="M148 196 L182 240 L128 246 Z" fill="#FFC9A3"/>
+  <path d="M364 196 L330 240 L384 246 Z" fill="#FFC9A3"/>
+
+  <!-- head -->
+  <ellipse cx="256" cy="288" rx="152" ry="138" fill="url(#fur)"/>
+
+  <!-- cheeks blush -->
+  <ellipse cx="164" cy="322" rx="30" ry="18" fill="#FF8FA3" opacity="0.55"/>
+  <ellipse cx="348" cy="322" rx="30" ry="18" fill="#FF8FA3" opacity="0.55"/>
+
+  <!-- eyes -->
+  <g>
+    <ellipse cx="205" cy="278" rx="26" ry="32" fill="#2E2A26"/>
+    <ellipse cx="307" cy="278" rx="26" ry="32" fill="#2E2A26"/>
+    <circle cx="213" cy="266" r="8" fill="#FFFFFF"/>
+    <circle cx="315" cy="266" r="8" fill="#FFFFFF"/>
+    <circle cx="199" cy="290" r="4" fill="#FFFFFF" opacity="0.8"/>
+    <circle cx="301" cy="290" r="4" fill="#FFFFFF" opacity="0.8"/>
+  </g>
+
+  <!-- nose -->
+  <path d="M244 322 L268 322 L256 336 Z" fill="#FF7A8A"/>
+
+  <!-- mouth -->
+  <path d="M256 336 Q256 350 236 352" stroke="#5A3B2A" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M256 336 Q256 350 276 352" stroke="#5A3B2A" stroke-width="5" fill="none" stroke-linecap="round"/>
+
+  <!-- whiskers -->
+  <g stroke="#FFF7EC" stroke-width="4" stroke-linecap="round" opacity="0.9">
+    <line x1="70" y1="300" x2="150" y2="292"/>
+    <line x1="66" y1="322" x2="150" y2="316"/>
+    <line x1="72" y1="344" x2="152" y2="336"/>
+    <line x1="442" y1="300" x2="362" y2="292"/>
+    <line x1="446" y1="322" x2="362" y2="316"/>
+    <line x1="440" y1="344" x2="360" y2="336"/>
+  </g>
+</svg>

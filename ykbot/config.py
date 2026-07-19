@@ -33,7 +33,6 @@ class Config:
     interests_reorganize_interval_seconds: int
     accounts_file: Path
     session_timeout_seconds: int
-    sessions_file: Path
     trivia_cache_file: Path
     trivia_state_file: Path
     lta_api_key: Optional[str]
@@ -84,7 +83,6 @@ class Config:
                 os.environ.get("ACCOUNTS_FILE", str(base_dir / "accounts.hash"))
             ).resolve(),
             session_timeout_seconds=int(os.environ.get("SESSION_TIMEOUT_SECONDS", "900")),
-            sessions_file=base_dir / "sessions.json",
             trivia_cache_file=base_dir / "trivia_cache.json",
             trivia_state_file=base_dir / "trivia_state.json",
             lta_api_key=os.environ.get("LTA_API_KEY"),

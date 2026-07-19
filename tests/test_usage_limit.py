@@ -16,7 +16,7 @@ class FakeClaudeClient:
     def lock_for(self, chat_id):
         return asyncio.Lock()
 
-    async def run(self, chat_id, prompt):
+    async def run(self, prompt):
         if self._exc is not None:
             raise self._exc
         return self._result

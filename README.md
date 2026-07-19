@@ -5,9 +5,8 @@ A locally-hosted Telegram bot built with [python-telegram-bot](https://github.co
 The bot only responds to a fixed set of commands — it does not relay
 arbitrary text to Claude. Each command maps to a preset prompt that's run
 through the `claude` CLI (`claude -p`), and the reply is sent back on
-Telegram. Each Telegram chat keeps its own Claude session, so follow-up
-messages continue the same conversation; use `/clearclaudememory` to start
-over.
+Telegram. Each command is an independent one-shot invocation — nothing
+carries over between commands.
 
 ## Commands
 
@@ -25,7 +24,6 @@ whichever account your password unlocked (see Accounts).
 | `/compileinterests` | Runs the same merge/enrich pass the background job runs periodically, on demand |
 | `/bus` | Bus arrival times — pick a preset stop, or share your location for the nearest ones |
 | `/endsession` | Ends the current session immediately, instead of waiting out the timeout |
-| `/clearclaudememory` | Clears Claude's memory of this conversation and starts fresh |
 | `/help` | Lists commands |
 
 Interests are stored as a numbered list in `accounts/<id>/interests.md` —
@@ -339,7 +337,7 @@ What `docker-compose.yml` does:
   and this repo's Python dependencies — no local venv needed.
 - Bind-mounts the whole repo into the container at `/app`. This means the
   gitignored, hand-edited files (`accounts.hash`, `accounts/`,
-  `sessions.json`, `trivia_cache.json`, ...) are read from and written back
+  `trivia_cache.json`, `message_logs/`, ...) are read from and written back
   to your actual working directory, exactly like running `python bot.py`
   directly — no separate data volume to manage, and no rebuild needed
   after editing `bot.py` (just `docker compose restart`).

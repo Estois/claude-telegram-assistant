@@ -9,7 +9,7 @@ from ykbot._logging import logger
 from ykbot.accounts import AccountStore, AllowlistStore
 from ykbot.app import YKBot, main
 from ykbot.bus import BusLocationsStore, BusStopsCache, LtaBusClient
-from ykbot.claude import ClaudeClient, ClaudeSessionStore
+from ykbot.claude import ClaudeClient
 from ykbot.config import Config
 from ykbot.formatting import CommandSpec, TelegramFormatter
 from ykbot.interests import InterestsStore
@@ -21,7 +21,6 @@ __all__ = [
     "Config",
     "AccountStore",
     "AllowlistStore",
-    "ClaudeSessionStore",
     "ClaudeClient",
     "InterestsStore",
     "MessageLogStore",

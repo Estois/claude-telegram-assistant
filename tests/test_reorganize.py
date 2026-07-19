@@ -22,8 +22,8 @@ class FakeClaudeClient:
     def lock_for(self, chat_id):
         return asyncio.Lock()
 
-    async def run(self, chat_id, prompt):
-        self.calls.append((chat_id, prompt))
+    async def run(self, prompt):
+        self.calls.append(prompt)
         return self._result
 
 
@@ -126,7 +126,7 @@ class ReorganizeLearningTests(AsyncBotTestCase):
 
         await news_bot._reorganize_account("amy")
 
-        prompt = fake.calls[0][1]
+        prompt = fake.calls[0]
         self.assertIn("quantum computing (requested 3x)", prompt)
         self.assertIn("obscure onetime (requested 1x)", prompt)
         self.assertEqual(

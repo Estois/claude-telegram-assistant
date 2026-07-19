@@ -155,7 +155,6 @@ def make_config(tmp_path: Path, **overrides) -> "bot.Config":
         interests_reorganize_interval_seconds=86400,
         accounts_file=tmp_path / "accounts.hash",
         session_timeout_seconds=900,
-        sessions_file=tmp_path / "sessions.json",
         trivia_cache_file=tmp_path / "trivia_cache.json",
         trivia_state_file=tmp_path / "trivia_state.json",
         lta_api_key=None,

@@ -27,7 +27,7 @@ from telegram.ext import (
 from ykbot._logging import logger
 from ykbot.accounts import AccountStore, AllowlistStore
 from ykbot.bus import BusLocationsStore, BusStopsCache, LtaBusClient
-from ykbot.claude import ClaudeClient, ClaudeSessionStore
+from ykbot.claude import ClaudeClient
 from ykbot.config import Config
 from ykbot.formatting import CommandSpec, TelegramFormatter
 from ykbot.interests import InterestsStore
@@ -54,8 +54,7 @@ class YKBot:
         self._config = config
         self._accounts = AccountStore(config.accounts_file, config.session_timeout_seconds)
         self._allowlist = AllowlistStore(config.env_file, config.allowed_user_ids)
-        self._sessions = ClaudeSessionStore(config.sessions_file)
-        self._claude = ClaudeClient(config, self._sessions)
+        self._claude = ClaudeClient(config)
         self._trivia = TriviaBook(config.trivia_cache_file, config.trivia_state_file, FALLBACK_TRIVIA)
         self._lta = LtaBusClient(config.lta_api_key)
         self._bus_stops = BusStopsCache(config.bus_stops_cache_file)
@@ -134,10 +133,6 @@ class YKBot:
             CommandSpec(
                 "endsession", "/endsession",
                 "end the current session now", self.handle_end_session,
-            ),
-            CommandSpec(
-                "clearclaudememory", "/clearclaudememory",
-                "clear Claude's memory of this conversation and start fresh", self.handle_clear_claude_memory,
             ),
             CommandSpec("help", "/help", "show this message", self.handle_help),
             CommandSpec(
@@ -389,12 +384,6 @@ class YKBot:
         if account_id is None:
             return
         await update.message.reply_text(self._build_help_text(self._is_admin(update, account_id)))
-
-    async def handle_clear_claude_memory(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if await self._require_session(update) is None:
-            return
-        self._sessions.clear(update.effective_chat.id)
-        await update.message.reply_text("Cleared Claude's memory.")
 
     async def handle_end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._require_session(update) is None:
@@ -882,11 +871,11 @@ class YKBot:
         *,
         chat_id: Optional[Union[int, str]] = None,
     ) -> Optional[str]:
-        """Runs prompt through Claude and returns the raw reply. Uses the
-        Telegram chat's own Claude session by default; pass chat_id to
-        target a different one (e.g. an account's maintenance session).
-        Returns None if a busy/usage-limit/error message was already sent to
-        the user and the caller should stop.
+        """Runs prompt through Claude and returns the raw reply. Each call is
+        an independent one-shot invocation. Serializes per lock key (the
+        Telegram chat by default; pass chat_id to target a different one, e.g.
+        an account's maintenance key). Returns None if a busy/usage-limit/error
+        message was already sent to the user and the caller should stop.
 
         Usage-limit detection lives only on the failure path (the CLI exits
         non-zero when it hits a limit — its authoritative signal). A
@@ -894,9 +883,9 @@ class YKBot:
         that merely discusses usage limits as a topic is passed through
         untouched instead of being mistaken for a limit notice."""
         telegram_chat_id = update.effective_chat.id
-        claude_chat_id = chat_id if chat_id is not None else telegram_chat_id
+        lock_key = chat_id if chat_id is not None else telegram_chat_id
 
-        lock = self._claude.lock_for(claude_chat_id)
+        lock = self._claude.lock_for(lock_key)
         if lock.locked():
             await update.message.reply_text("Still working on your last request — hang on.")
             return None
@@ -904,7 +893,7 @@ class YKBot:
         async with lock:
             keep_typing = asyncio.create_task(self._keep_typing(context, telegram_chat_id))
             try:
-                return await self._claude.run(claude_chat_id, prompt)
+                return await self._claude.run(prompt)
             except Exception as exc:
                 logger.exception("claude invocation failed")
                 await self._reply_to_claude_failure(update, exc)
@@ -981,7 +970,7 @@ class YKBot:
                 return
 
             prompt = self._build_reorganize_prompt(entries, theme_counts)
-            raw_reply = await self._claude.run(maintenance_key, prompt)
+            raw_reply = await self._claude.run(prompt)
             new_entries = InterestsStore.parse_entries(raw_reply)
             if not new_entries:
                 logger.warning(

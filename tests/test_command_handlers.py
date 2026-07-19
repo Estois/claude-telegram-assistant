@@ -38,15 +38,6 @@ class CommandHandlerTests(AsyncBotTestCase):
         self.assertEqual(len(update.message.replies), 1)
         self.assertIn("30 minutes", update.message.replies[0])
 
-    async def test_clear_claude_memory_forgets_the_chats_session(self):
-        news_bot = self._make_bot()
-        news_bot._sessions.set(self.CHAT_ID, "session-abc")
-        update = self._update()
-
-        await news_bot.handle_clear_claude_memory(update, FakeContext())
-
-        self.assertEqual(update.message.replies, ["Cleared Claude's memory."])
-        self.assertIsNone(news_bot._sessions.get(self.CHAT_ID))
 
     async def test_add_interests_without_args_shows_usage(self):
         news_bot = self._make_bot()
