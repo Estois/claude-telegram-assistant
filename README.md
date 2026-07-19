@@ -81,6 +81,39 @@ command or a wrong password attempt — never an error, and never a hint
 about what commands exist. Plain text messages are never sent to Claude
 — see Accounts below.
 
+### Button menu
+
+`/menu` (and the post-unlock welcome message) shows an inline-button board
+as a faster alternative to typing slash commands — every button ultimately
+runs the same handler code as its slash-command equivalent. All slash
+commands keep working unchanged, and `/help` stays slash-only (it's not on
+the board).
+
+The top-level board has 🚌 Bus, 📰 News, ⭐ Interests, 🔗 Summarize, and 🔒 End
+session, plus a 🛠 Admin row shown only to an admin session. Bus opens the
+same fav-stop menu as `/bus`. News, Summarize, and Interests → ➕ Add each
+arm a one-shot capture and prompt for text — your next plain message is
+read as that command's argument instead of a password attempt. End session
+asks for a ✅ Yes/❌ No confirmation before locking.
+
+Tapping ⭐ Interests opens a submenu: 📋 List, ➕ Add, ✏️ Update, 🗑 Remove,
+🗂 Compile, and ⬅️ Back. Update and Remove first show one button per saved
+interest to pick from; Remove then asks for a Yes/No confirmation, Update
+prompts for the replacement wording (same "revise or replace" behavior as
+`/updateinterests`).
+
+Tapping 🛠 Admin (admin sessions only) opens 👥 Get users, 🗑 Remove user,
+🆔 Allow Telegram id, and ⬅️ Back. Remove user shows one button per
+removable account, then a Yes/No confirmation. Allow Telegram id prompts
+for the id, same as `/adduserteleid`. Adding a new account with a password
+hash stays slash-only (`/adduser <name> <sha256hash>`) — there's no
+sensible way to type a hash through a button flow.
+
+Every button action re-checks the session server-side (and admin actions
+re-check admin) exactly like the slash command it mirrors — a button only
+being visible to the right session doesn't mean the underlying handler
+trusts that; it never does.
+
 ## Accounts
 
 Every command is gated behind a password — even ones like `/help` or
