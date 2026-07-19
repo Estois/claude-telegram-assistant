@@ -463,7 +463,11 @@ class YKBot:
             await update.message.reply_text("Usage: /news <subject>\nExample: /news cybersecurity")
             return
 
-        subject = " ".join(context.args)
+        await self._do_news(update, context, account_id, " ".join(context.args))
+
+    async def _do_news(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, account_id: str, subject: str
+    ) -> None:
         if self._config.news_learning_enabled:
             try:
                 self._news_history_for(account_id).append(subject)
@@ -494,6 +498,11 @@ class YKBot:
             )
             return
 
+        await self._do_summarize(update, context, url)
+
+    async def _do_summarize(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
+    ) -> None:
         reply = await self._run_claude(
             update, context, self._build_summarize_prompt(url), web_tools=True
         )
@@ -534,9 +543,11 @@ class YKBot:
                 "especially supply chain attacks"
             )
             return
-        topic = " ".join(context.args)
-        index = self._interests_for(account_id).add(topic)
-        await update.message.reply_text(f"Added as interest #{index}.")
+        await self._do_add_interest(update, account_id, " ".join(context.args))
+
+    async def _do_add_interest(self, update: Update, account_id: str, text: str) -> None:
+        index = self._interests_for(account_id).add(text)
+        await update.effective_message.reply_text(f"Added as interest #{index}.")
 
     async def handle_get_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -577,14 +588,25 @@ class YKBot:
             )
             return
 
-        topic = " ".join(topic_parts)
-        prompt = self._build_update_interest_prompt(entries[index - 1], topic)
+        await self._do_update_interest(update, context, account_id, index, " ".join(topic_parts))
+
+    async def _do_update_interest(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        account_id: str,
+        index: int,
+        text: str,
+    ) -> None:
+        interests = self._interests_for(account_id)
+        entries = interests.list()
+        prompt = self._build_update_interest_prompt(entries[index - 1], text)
         new_text = await self._run_claude(update, context, prompt)
         if new_text is None:
             return
 
         interests.update(index, new_text)
-        await update.message.reply_text(f"Updated interest #{index}.")
+        await update.effective_message.reply_text(f"Updated interest #{index}.")
 
     async def handle_remove_interest(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -598,19 +620,22 @@ class YKBot:
             )
             return
 
-        index = int(context.args[0])
         interests = self._interests_for(account_id)
         if not interests.list():
             await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
             return
 
+        await self._do_remove_interest(update, account_id, int(context.args[0]))
+
+    async def _do_remove_interest(self, update: Update, account_id: str, index: int) -> None:
+        interests = self._interests_for(account_id)
         removed = interests.remove(index)
         if removed is None:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"No interest #{index}. Valid range: 1-{len(interests.list())}. See /getinterests."
             )
             return
-        await update.message.reply_text(f'Removed interest #{index}: "{removed}"')
+        await update.effective_message.reply_text(f'Removed interest #{index}: "{removed}"')
 
     async def handle_compile_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Manual trigger for the same reorganization the background job
