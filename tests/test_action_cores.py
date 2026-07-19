@@ -38,3 +38,22 @@ class ActionCoreTests(AsyncBotTestCase):
         await b.handle_news(update, FakeContext(args=[]))
 
         self.assertIn("Usage: /news", update.message.replies[0])
+
+    async def test_do_show_interests_lists_when_present(self):
+        b = self._make_bot()
+        b._interests_for("alice").add("space")
+        update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID)
+
+        await b._do_show_interests(update, "alice")
+
+        self.assertIn("space", update.message.replies[-1])
+
+    async def test_open_bus_menu_sets_fav_context(self):
+        b = self._make_bot()
+        ctx = FakeContext()
+        update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID)
+
+        await b._open_bus_menu(update, ctx, "alice")
+
+        self.assertEqual(ctx.user_data["bus_menu"], {"kind": "fav"})
+        self.assertTrue(update.message.replies)

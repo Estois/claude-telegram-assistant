@@ -553,11 +553,16 @@ class YKBot:
         account_id = await self._require_session(update)
         if account_id is None:
             return
+        await self._do_show_interests(update, account_id)
+
+    async def _do_show_interests(self, update: Update, account_id: str) -> None:
         entries = self._interests_for(account_id).list()
         if not entries:
-            await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
+            await update.effective_message.reply_text(
+                "No interests saved yet. Add one with /addinterests <topic>."
+            )
             return
-        await update.message.reply_text(self._format_interests_listing(entries))
+        await update.effective_message.reply_text(self._format_interests_listing(entries))
 
     async def handle_update_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -644,12 +649,18 @@ class YKBot:
         account_id = await self._require_session(update)
         if account_id is None:
             return
+        await self._do_compile_interests(update, context, account_id)
 
+    async def _do_compile_interests(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, account_id: str
+    ) -> None:
         interests = self._interests_for(account_id)
         entries = interests.list()
         theme_counts = self._recent_theme_counts(account_id)
         if len(entries) < 2 and not theme_counts:
-            await update.message.reply_text("Need at least 2 interests to reorganize. See /getinterests.")
+            await update.effective_message.reply_text(
+                "Need at least 2 interests to reorganize. See /getinterests."
+            )
             return
 
         prompt = self._build_reorganize_prompt(entries, theme_counts)
@@ -661,12 +672,14 @@ class YKBot:
 
         new_entries = InterestsStore.parse_entries(raw_reply)
         if not new_entries:
-            await update.message.reply_text("Reorganize returned nothing usable — no changes made.")
+            await update.effective_message.reply_text(
+                "Reorganize returned nothing usable — no changes made."
+            )
             return
 
         interests.replace_all(new_entries)
         summary = f"🗂 Reorganized interests: {len(entries)} → {len(new_entries)} entries."
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"{summary}\n\n{self._format_interests_listing(new_entries)}"
         )
 
@@ -757,10 +770,14 @@ class YKBot:
         account_id = await self._require_session(update)
         if account_id is None:
             return
+        await self._open_bus_menu(update, context, account_id)
 
+    async def _open_bus_menu(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, account_id: str
+    ) -> None:
         context.user_data["bus_menu"] = {"kind": "fav"}
         text, markup = self._build_fav_menu(account_id)
-        await update.message.reply_text(text, reply_markup=markup)
+        await update.effective_message.reply_text(text, reply_markup=markup)
 
     def _build_fav_menu(self, account_id: str) -> "tuple[str, InlineKeyboardMarkup]":
         locations = self._bus_locations_for(account_id).list()
