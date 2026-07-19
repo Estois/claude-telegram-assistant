@@ -1,12 +1,46 @@
 """Account authentication and the Telegram-user allowlist."""
 
 import hashlib
+import hmac
+import os
 import re
 import time
 from pathlib import Path
 from typing import Optional
 
 from ykbot._logging import logger
+
+# Password storage. New/migrated passwords use salted scrypt; legacy entries
+# are bare SHA-256 hex and are upgraded to scrypt on first successful unlock.
+SCRYPT_PREFIX = "scrypt$"
+_SCRYPT_N, _SCRYPT_R, _SCRYPT_P, _SCRYPT_DKLEN = 16384, 8, 1, 32
+_SCRYPT_MAXMEM = 64 * 1024 * 1024
+
+
+def hash_scrypt(password: str) -> str:
+    """Salted scrypt hash in the form scrypt$<n>$<r>$<p>$<salt_hex>$<hash_hex>."""
+    salt = os.urandom(16)
+    derived = hashlib.scrypt(
+        password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
+        dklen=_SCRYPT_DKLEN, maxmem=_SCRYPT_MAXMEM,
+    )
+    return f"{SCRYPT_PREFIX}{_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt.hex()}${derived.hex()}"
+
+
+def verify_password(attempt: str, stored: str) -> bool:
+    """Constant-time verify against a scrypt or legacy SHA-256 stored hash."""
+    if stored.startswith(SCRYPT_PREFIX):
+        try:
+            _, n, r, p, salt_hex, hash_hex = stored.split("$")
+            derived = hashlib.scrypt(
+                attempt.encode(), salt=bytes.fromhex(salt_hex),
+                n=int(n), r=int(r), p=int(p),
+                dklen=len(bytes.fromhex(hash_hex)), maxmem=_SCRYPT_MAXMEM,
+            )
+            return hmac.compare_digest(derived.hex(), hash_hex)
+        except (ValueError, TypeError):
+            return False
+    return hmac.compare_digest(hashlib.sha256(attempt.encode()).hexdigest(), stored.lower())
 
 
 class AccountStore:
@@ -15,17 +49,27 @@ class AccountStore:
 
     One account can have multiple password hashes — e.g. one per device —
     and any of them unlocks that account, sharing its interests and bus
-    locations. The password itself is never stored, only its SHA256 hex
-    digest, read fresh from disk on every attempt so accounts can be
-    added/rotated without a restart.
+    locations. The password itself is never stored. New/migrated passwords
+    are salted scrypt hashes; a bare SHA-256 hex entry (the historical
+    format, still fine to hand-add) is upgraded to scrypt on its first
+    successful unlock. Hashes are read fresh from disk on every attempt so
+    accounts can be added/rotated without a restart. Repeated failed
+    attempts from one chat are throttled (see MAX_FAILURES / LOCKOUT_SECONDS).
     """
 
     ACCOUNT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+    # Brute-force throttle: after MAX_FAILURES failed unlocks within
+    # FAILURE_WINDOW seconds, a chat is locked out for LOCKOUT_SECONDS.
+    MAX_FAILURES = 5
+    FAILURE_WINDOW = 300
+    LOCKOUT_SECONDS = 60
 
     def __init__(self, accounts_file: Path, session_timeout_seconds: int):
         self._accounts_file = accounts_file
         self._session_timeout_seconds = session_timeout_seconds
         self._sessions: dict[int, tuple] = {}  # chat_id -> (account_id, expiry)
+        self._failures: dict[int, list] = {}  # chat_id -> recent failed-attempt times
 
     @property
     def is_configured(self) -> bool:
@@ -56,14 +100,42 @@ class AccountStore:
         )
 
     def try_unlock(self, chat_id: int, attempt: str) -> Optional[str]:
-        """Returns the account id the attempt unlocked, or None if it
-        matched no account's hash."""
-        digest = hashlib.sha256(attempt.encode()).hexdigest()
-        for account_id, hashes in self._load_accounts().items():
-            if digest in hashes:
-                self._sessions[chat_id] = (account_id, time.monotonic() + self._session_timeout_seconds)
-                return account_id
+        """Returns the account id the attempt unlocked, or None if it matched
+        no account's hash. On a successful match against a legacy SHA-256
+        hash, that entry is upgraded to salted scrypt in accounts.hash."""
+        header, sections = self._parse_sections()
+        for account_id, hashes in sections.items():
+            for i, stored in enumerate(hashes):
+                if verify_password(attempt, stored):
+                    self._sessions[chat_id] = (
+                        account_id, time.monotonic() + self._session_timeout_seconds
+                    )
+                    if not stored.startswith(SCRYPT_PREFIX):
+                        hashes[i] = hash_scrypt(attempt)
+                        try:
+                            self._write_sections(header, sections)
+                        except OSError:
+                            logger.exception("Failed to persist password upgrade for %s", account_id)
+                    return account_id
         return None
+
+    def register_failed_unlock(self, chat_id: int) -> None:
+        now = time.monotonic()
+        recent = [t for t in self._failures.get(chat_id, []) if now - t < self.FAILURE_WINDOW]
+        recent.append(now)
+        self._failures[chat_id] = recent
+
+    def clear_failed_unlocks(self, chat_id: int) -> None:
+        self._failures.pop(chat_id, None)
+
+    def unlock_retry_after(self, chat_id: int) -> float:
+        """Seconds a chat must wait before another unlock attempt is honored
+        (0 if not throttled)."""
+        now = time.monotonic()
+        recent = [t for t in self._failures.get(chat_id, []) if now - t < self.FAILURE_WINDOW]
+        if len(recent) >= self.MAX_FAILURES:
+            return max(0.0, self.LOCKOUT_SECONDS - (now - max(recent)))
+        return 0.0
 
     def lock(self, chat_id: int) -> bool:
         """Ends the session for a chat immediately. Returns whether one was

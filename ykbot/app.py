@@ -815,10 +815,18 @@ class YKBot:
             return
 
         chat_id = update.effective_chat.id
-        attempt = (update.message.text or "").strip()
 
+        # Brute-force throttle: after too many recent failures, ignore attempts
+        # (even correct ones) for a cooldown. Reply with trivia either way so a
+        # throttled chat is indistinguishable from a wrong guess.
+        if self._accounts.unlock_retry_after(chat_id) > 0:
+            await update.message.reply_text(self._trivia.next_fact())
+            return
+
+        attempt = (update.message.text or "").strip()
         account_id = self._accounts.try_unlock(chat_id, attempt)
         if account_id is not None:
+            self._accounts.clear_failed_unlocks(chat_id)
             try:
                 await context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
             except Exception:
@@ -828,8 +836,9 @@ class YKBot:
             await context.bot.send_message(chat_id=chat_id, text=self._build_welcome_text(name, admin))
             return
 
-        # Wrong password (or none configured yet) — no hint that this was an
-        # auth attempt, just a generic reply.
+        # Wrong password (or none configured yet) — record the failure and give
+        # no hint that this was an auth attempt, just a generic reply.
+        self._accounts.register_failed_unlock(chat_id)
         await update.message.reply_text(self._trivia.next_fact())
 
     async def _log_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

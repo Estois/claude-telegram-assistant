@@ -109,7 +109,12 @@ same bot.
 3. In Telegram, send the plain-text password (not a command) as a message.
    If it matches, the bot deletes that message immediately, permanently
    removing the password from the chat, and starts a session as that
-   password's account.
+   password's account. On that first successful unlock the bot rewrites the
+   entry from bare SHA-256 to a salted **scrypt** hash — so you keep the
+   familiar `sha256sum` workflow when adding passwords, and they're
+   automatically upgraded to a slow, salted hash the first time they're used.
+   Repeated wrong guesses from one chat are rate-limited (5 failures → a
+   short cooldown) to blunt brute-force attempts.
 4. The session lasts `SESSION_TIMEOUT_SECONDS` (default 900 = 15 minutes)
    from the moment it unlocks, regardless of activity. After it expires,
    every command locks again and needs the password re-sent. Send
