@@ -19,7 +19,7 @@ class ClaudeClient:
 
     def __init__(self, config: Config):
         self._config = config
-        self._locks: dict = {}
+        self._locks: dict[Union[int, str], asyncio.Lock] = {}
 
     def lock_for(self, chat_id: Union[int, str]) -> asyncio.Lock:
         return self._locks.setdefault(chat_id, asyncio.Lock())

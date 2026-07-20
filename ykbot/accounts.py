@@ -87,8 +87,10 @@ class AccountStore:
     def __init__(self, accounts_file: Path, session_timeout_seconds: int):
         self._accounts_file = accounts_file
         self._session_timeout_seconds = session_timeout_seconds
-        self._sessions: dict[int, tuple] = {}  # chat_id -> (account_id, expiry)
-        self._failures: dict[int, list] = {}  # chat_id -> recent failed-attempt times
+        # chat_id -> (account_id, monotonic expiry)
+        self._sessions: dict[int, tuple[str, float]] = {}
+        # chat_id -> monotonic times of recent failed attempts
+        self._failures: dict[int, list[float]] = {}
 
     @property
     def is_configured(self) -> bool:
@@ -99,7 +101,14 @@ class AccountStore:
 
     def is_unlocked(self, chat_id: int) -> bool:
         session = self._sessions.get(chat_id)
-        return session is not None and time.monotonic() < session[1]
+        if session is None:
+            return False
+        if time.monotonic() >= session[1]:
+            # Drop it rather than leaving expired entries resident for the
+            # life of the process.
+            del self._sessions[chat_id]
+            return False
+        return True
 
     def account_for(self, chat_id: int) -> Optional[str]:
         """The account this chat is currently unlocked as, or None if
@@ -144,6 +153,12 @@ class AccountStore:
         recent.append(now)
         self._failures[chat_id] = recent
 
+    def _prune_failures(self, chat_id: int, recent: list) -> None:
+        if recent:
+            self._failures[chat_id] = recent
+        else:
+            self._failures.pop(chat_id, None)
+
     def clear_failed_unlocks(self, chat_id: int) -> None:
         self._failures.pop(chat_id, None)
 
@@ -152,6 +167,7 @@ class AccountStore:
         (0 if not throttled)."""
         now = time.monotonic()
         recent = [t for t in self._failures.get(chat_id, []) if now - t < self.FAILURE_WINDOW]
+        self._prune_failures(chat_id, recent)
         if len(recent) >= self.MAX_FAILURES:
             return max(0.0, self.LOCKOUT_SECONDS - (now - max(recent)))
         return 0.0
