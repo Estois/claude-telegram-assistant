@@ -1,3 +1,5 @@
+from telegram.error import BadRequest
+
 import bot
 from tests.helpers import (
     AsyncBotTestCase, FakeContext, FakeUpdate, make_config, write_accounts_file,
@@ -388,6 +390,29 @@ class MenuTests(AsyncBotTestCase):
 
         self.assertTrue(update.callback_query.edits or update.message.replies)
 
+    async def test_admin_getusers_retap_is_swallowed_when_not_modified(self):
+        """Re-tapping Get users re-renders the identical listing text under
+        the identical admin_keyboard(), which Telegram refuses to edit to
+        ("message is not modified"). _safe_edit must swallow that, not let
+        it propagate and silently break the button."""
+        b = self._admin_bot()
+        update = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="act:getusers")
+        update.callback_query.edit_exception = BadRequest("Message is not modified")
+
+        await b.handle_admin_action(update, FakeContext())  # must not raise
+
+        self.assertEqual(update.callback_query.edits, [])  # edit was attempted, nothing recorded
+
+    async def test_admin_getusers_other_bad_request_propagates(self):
+        """A genuine BadRequest (malformed markup, message too old to edit)
+        is a real failure and must not be swallowed by _safe_edit."""
+        b = self._admin_bot()
+        update = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="act:getusers")
+        update.callback_query.edit_exception = BadRequest("Something else entirely")
+
+        with self.assertRaises(BadRequest):
+            await b.handle_admin_action(update, FakeContext())
+
     async def test_non_admin_action_rejected(self):
         b = self._make_bot()
         self._unlock(b, self.CHAT_ID, "pw")  # alice, not admin
@@ -474,6 +499,18 @@ class MenuTests(AsyncBotTestCase):
         await b.handle_admin_pick_remove(update, FakeContext())
 
         self.assertEqual(update.callback_query.last_text, "No removable accounts.")
+
+    async def test_admin_pick_remove_retap_with_none_left_is_swallowed(self):
+        """Same not-modified shape as Get users: re-tapping with no
+        removable accounts left re-renders the identical screen."""
+        b = self._admin_bot()
+        b._accounts.remove_account("alice")
+        update = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="adm_pick_rm")
+        update.callback_query.edit_exception = BadRequest("Message is not modified")
+
+        await b.handle_admin_pick_remove(update, FakeContext())  # must not raise
+
+        self.assertEqual(update.callback_query.edits, [])
 
     async def test_non_admin_pick_remove_rejected(self):
         b = self._make_bot()

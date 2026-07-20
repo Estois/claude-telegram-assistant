@@ -7,6 +7,8 @@ _build_arrivals_keyboard focused)."""
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+HOME_BUTTON = InlineKeyboardButton("🏠 Menu", callback_data="home")
+
 
 def top_level_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
@@ -71,4 +73,4 @@ def home_keyboard() -> InlineKeyboardMarkup:
     they aren't dead ends. Its callback_data is deliberately NOT menu:root:
     that one navigates by editing the message in place, which would destroy
     the very result this button is attached to."""
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu", callback_data="home")]])
+    return InlineKeyboardMarkup([[HOME_BUTTON]])

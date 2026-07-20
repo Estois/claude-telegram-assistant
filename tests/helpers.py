@@ -63,11 +63,18 @@ class FakeCallbackQuery:
         self.message = message
         self.answers: list = []
         self.edits: list = []  # (text, reply_markup) tuples
+        # Tests can set this to an exception instance to make the next (and
+        # every subsequent) edit_message_text() raise it instead of
+        # recording the edit — e.g. telegram.error.BadRequest, to simulate
+        # Telegram's "message is not modified" response.
+        self.edit_exception: Exception = None
 
     async def answer(self, text=None, **kwargs):
         self.answers.append(text)
 
     async def edit_message_text(self, text, **kwargs):
+        if self.edit_exception is not None:
+            raise self.edit_exception
         self.edits.append((text, kwargs.get("reply_markup")))
 
     @property

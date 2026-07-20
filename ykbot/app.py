@@ -972,6 +972,19 @@ class YKBot:
             for account_id in account_ids
         )
 
+    @staticmethod
+    async def _safe_edit(query, text: str, reply_markup=None) -> None:
+        """Edits a callback message, tolerating Telegram's "message is not
+        modified" error. A menu screen can carry the very button that renders
+        it (Get users sits inside the admin keyboard), so re-tapping produces
+        a byte-identical edit — which Telegram rejects. Nothing is wrong when
+        that happens; the screen is simply already correct."""
+        try:
+            await query.edit_message_text(text, reply_markup=reply_markup)
+        except BadRequest as exc:
+            if "not modified" not in str(exc).lower():
+                raise
+
     async def handle_admin_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         if await self._require_admin(update) is None:
@@ -980,8 +993,8 @@ class YKBot:
         await query.answer()
         action = query.data.split(":", 1)[1]
         if action == "getusers":
-            await query.edit_message_text(
-                self._format_user_listing(), reply_markup=menus.admin_keyboard()
+            await self._safe_edit(
+                query, self._format_user_listing(), reply_markup=menus.admin_keyboard()
             )
         elif action == "adduserteleid":
             context.user_data["awaiting"] = {"kind": "add_user_tele_id", "payload": {}}
@@ -995,7 +1008,7 @@ class YKBot:
         await query.answer()
         accounts = [a for a in self._accounts.list_ids() if a != self._config.admin_account_id]
         if not accounts:
-            await query.edit_message_text("No removable accounts.", reply_markup=menus.admin_keyboard())
+            await self._safe_edit(query, "No removable accounts.", reply_markup=menus.admin_keyboard())
             return
         await query.edit_message_text(
             "Pick an account to remove:", reply_markup=menus.account_pick_keyboard(accounts)
@@ -1037,7 +1050,7 @@ class YKBot:
         buttons.append(
             [InlineKeyboardButton("➕ Add a stop by code", callback_data="bus_addbycode")]
         )
-        buttons.append([InlineKeyboardButton("🏠 Menu", callback_data="home")])
+        buttons.append([menus.HOME_BUTTON])
         return "Pick a stop:", InlineKeyboardMarkup(buttons)
 
     def _build_near_menu(self, stops: list) -> "tuple[str, InlineKeyboardMarkup]":
@@ -1050,7 +1063,7 @@ class YKBot:
             ]
             for stop in stops
         ]
-        buttons.append([InlineKeyboardButton("🏠 Menu", callback_data="home")])
+        buttons.append([menus.HOME_BUTTON])
         return "Nearest stops:", InlineKeyboardMarkup(buttons)
 
     async def handle_bus_request_location(
@@ -1316,7 +1329,7 @@ class YKBot:
             url = text.strip()
             if not self._is_fetchable_url(url):
                 await self._reply_result(
-                    update, "Please give a single public http(s) URL to summarize.", True
+                    update, "Please give a single public http(s) URL to summarize.", from_menu=True
                 )
             else:
                 await self._do_summarize(update, context, url, from_menu=True)
@@ -1334,7 +1347,7 @@ class YKBot:
                 )
             else:
                 await self._reply_result(
-                    update, f"Interest #{index} no longer exists. See /getinterests.", True
+                    update, f"Interest #{index} no longer exists. See /getinterests.", from_menu=True
                 )
         return True
 

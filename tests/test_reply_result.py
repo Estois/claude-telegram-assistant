@@ -33,12 +33,14 @@ class ReplyResultTests(AsyncBotTestCase):
         seen = {}
 
         async def capture(text, **kwargs):
+            seen["text"] = text
             seen.update(kwargs)
 
         update.effective_message.reply_text = capture
 
         await b._reply_result(update, "done", False, parse_mode="HTML")
 
+        self.assertEqual(seen["text"], "done")
         self.assertEqual(seen["parse_mode"], "HTML")
 
 
