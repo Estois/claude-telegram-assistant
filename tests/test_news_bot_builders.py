@@ -55,9 +55,8 @@ class YKBotBuilderTests(BotTestCase):
 
     def test_news_prompt_injects_interests_when_present(self):
         news_bot = self._make_bot()
-        news_bot._interests_for("alice").add("cybersecurity")
 
-        prompt = news_bot._build_news_prompt("tokyo", "alice")
+        prompt = news_bot._build_news_prompt("tokyo", ["cybersecurity"])
 
         self.assertIn("cybersecurity", prompt)
         self.assertIn("personal interests", prompt)
@@ -65,7 +64,7 @@ class YKBotBuilderTests(BotTestCase):
     def test_news_prompt_requires_dates_reputable_sources_and_verification(self):
         news_bot = self._make_bot()
 
-        prompt = news_bot._build_news_prompt("tokyo", "alice").lower()
+        prompt = news_bot._build_news_prompt("tokyo", []).lower()
 
         self.assertIn('news digest about "tokyo"', prompt)
         self.assertIn("reputable", prompt)   # only reputable sites

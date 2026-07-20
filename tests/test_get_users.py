@@ -16,7 +16,9 @@ class FormatUserListingTests(BotTestCase):
     def test_no_accounts_configured(self):
         news_bot = self._make_bot()
 
-        self.assertEqual(news_bot._format_user_listing(), "No accounts configured.")
+        self.assertEqual(
+            news_bot._format_user_listing(news_bot._accounts.list_ids()), "No accounts configured."
+        )
 
     def test_lists_every_account_as_locked_when_none_unlocked(self):
         news_bot = self._make_bot()
@@ -24,7 +26,7 @@ class FormatUserListingTests(BotTestCase):
             news_bot._config.accounts_file, {"alice": ["hunter2"], "bob": ["swordfish"]}
         )
 
-        listing = news_bot._format_user_listing()
+        listing = news_bot._format_user_listing(news_bot._accounts.list_ids())
 
         self.assertIn("alice — 🔒 locked", listing)
         self.assertIn("bob — 🔒 locked", listing)
@@ -36,7 +38,7 @@ class FormatUserListingTests(BotTestCase):
         )
         news_bot._accounts.try_unlock(chat_id=1, attempt="hunter2")
 
-        listing = news_bot._format_user_listing()
+        listing = news_bot._format_user_listing(news_bot._accounts.list_ids())
 
         self.assertIn("alice — 🟢 active", listing)
         self.assertIn("bob — 🔒 locked", listing)

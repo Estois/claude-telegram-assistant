@@ -104,13 +104,17 @@ class YKBot:
     def _news_history_for(self, account_id: str) -> NewsHistoryStore:
         return NewsHistoryStore(self._account_dir(account_id) / self.NEWS_HISTORY_FILENAME)
 
-    def _recent_theme_counts(self, account_id: str) -> list:
+    async def _recent_theme_counts(self, account_id: str) -> list:
         """Recent /news request themes with counts for this account, or an
         empty list when learning is disabled. Shared by the daily reorganize
-        job and the manual /compileinterests command so they behave the same."""
+        job and the manual /compileinterests command so they behave the same.
+
+        Async because it reads the history file: the read goes to a worker
+        thread so it doesn't stall the event loop."""
         if not self._config.news_learning_enabled:
             return []
-        return self._news_history_for(account_id).theme_counts(
+        return await asyncio.to_thread(
+            self._news_history_for(account_id).theme_counts,
             self._config.news_history_window_days,
             self._config.news_history_max_entries,
         )
@@ -392,8 +396,7 @@ class YKBot:
             return None
         return account_id
 
-    def _build_news_prompt(self, subject: str, account_id: str) -> str:
-        interests = self._interests_for(account_id).list()
+    def _build_news_prompt(self, subject: str, interests: list) -> str:
         if interests:
             interests_block = (
                 "For context, here are my personal interests (do not mention this list, "
@@ -700,8 +703,9 @@ class YKBot:
             except Exception:
                 # Logging the subject must never break the digest reply.
                 logger.exception("Failed to log /news subject for %s", account_id)
+        interests = await asyncio.to_thread(self._interests_for(account_id).list)
         reply = await self._run_claude(
-            update, context, self._build_news_prompt(subject, account_id), web_tools=True
+            update, context, self._build_news_prompt(subject, interests), web_tools=True
         )
         if reply is not None:
             await self._send_formatted(update, self._strip_news_preamble(reply), from_menu)
@@ -899,7 +903,7 @@ class YKBot:
     ) -> None:
         interests = self._interests_for(account_id)
         entries = interests.list()
-        theme_counts = self._recent_theme_counts(account_id)
+        theme_counts = await self._recent_theme_counts(account_id)
         if len(entries) < 2 and not theme_counts:
             await self._reply_result(
                 update, "Need at least 2 interests to reorganize. See /getinterests.", from_menu
@@ -1011,10 +1015,12 @@ class YKBot:
         if await self._require_admin(update) is None:
             return
 
-        await update.message.reply_text(self._format_user_listing())
+        account_ids = await asyncio.to_thread(self._accounts.list_ids)
+        await update.message.reply_text(self._format_user_listing(account_ids))
 
-    def _format_user_listing(self) -> str:
-        account_ids = self._accounts.list_ids()
+    def _format_user_listing(self, account_ids: list) -> str:
+        """Pure: takes the account ids rather than reading them. Session
+        state is in-memory, so has_active_session stays a direct call."""
         if not account_ids:
             return "No accounts configured."
         return "\n".join(
@@ -1043,8 +1049,9 @@ class YKBot:
         await query.answer()
         action = query.data.split(":", 1)[1]
         if action == "getusers":
+            account_ids = await asyncio.to_thread(self._accounts.list_ids)
             await self._safe_edit(
-                query, self._format_user_listing(), reply_markup=menus.admin_keyboard()
+                query, self._format_user_listing(account_ids), reply_markup=menus.admin_keyboard()
             )
         elif action == "adduserteleid":
             context.user_data["awaiting"] = {"kind": "add_user_tele_id", "payload": {}}
@@ -1637,7 +1644,7 @@ class YKBot:
         async with self._claude.lock_for(maintenance_key):
             interests = self._interests_for(account_id)
             entries = interests.list()
-            theme_counts = self._recent_theme_counts(account_id)
+            theme_counts = await self._recent_theme_counts(account_id)
 
             # Nothing to do without either enough interests to reorganize or any
             # request history to learn from.

@@ -77,5 +77,43 @@ class ArrivalsKeyboardBuilderTests(BotTestCase):
         self.assertIn("bus_back", datas(markup))
 
 
+class NewsPromptBuilderTests(BotTestCase):
+    def _make_bot(self):
+        b = bot.YKBot(make_config(self.tmp_path))
+        b._interests_for = lambda account_id: ExplodingStore()
+        return b
+
+    def test_takes_interests_and_touches_no_store(self):
+        b = self._make_bot()
+
+        prompt = b._build_news_prompt("space", ["rockets", "telescopes"])
+
+        self.assertIn("space", prompt)
+        self.assertIn("rockets", prompt)
+
+    def test_empty_interests_still_builds_a_prompt(self):
+        b = self._make_bot()
+
+        prompt = b._build_news_prompt("space", [])
+
+        self.assertIn("space", prompt)
+
+
+class UserListingBuilderTests(BotTestCase):
+    def test_takes_account_ids_and_marks_sessions(self):
+        b = bot.YKBot(make_config(self.tmp_path))
+
+        listing = b._format_user_listing(["alice", "bob"])
+
+        self.assertIn("alice", listing)
+        self.assertIn("bob", listing)
+        self.assertIn("🔒 locked", listing)
+
+    def test_empty_list_says_so(self):
+        b = bot.YKBot(make_config(self.tmp_path))
+
+        self.assertEqual(b._format_user_listing([]), "No accounts configured.")
+
+
 if __name__ == "__main__":
     unittest.main()
