@@ -96,6 +96,15 @@ arm a one-shot capture and prompt for text — your next plain message is
 read as that command's argument instead of a password attempt. End session
 asks for a ✅ Yes/❌ No confirmation before locking.
 
+Results you got from the menu come back with a 🏠 Menu button attached — tapping
+it posts a fresh menu **below** the result rather than replacing it, so a digest
+you're still reading stays on screen. Results from a typed slash command have no
+button (if you're typing commands you don't need one). The ⬅️ Back buttons inside
+the menus still navigate by editing in place, which is what you want for a
+throwaway menu screen. Old 🏠 buttons stay tappable indefinitely and always render
+a current menu — button presence is never authorization, so every action still
+re-checks your session.
+
 Tapping ⭐ Interests opens a submenu: 📋 List, ➕ Add, ✏️ Update, 🗑 Remove,
 🗂 Compile, and ⬅️ Back. Update and Remove first show one button per saved
 interest to pick from; Remove then asks for a Yes/No confirmation, Update
