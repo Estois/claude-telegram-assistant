@@ -255,6 +255,7 @@ class YKBot:
             CallbackQueryHandler(self.handle_bus_request_location, pattern=r"^bus_request_location$")
         )
         app.add_handler(CallbackQueryHandler(self.handle_menu_nav, pattern=r"^menu:"))
+        app.add_handler(CallbackQueryHandler(self.handle_menu_home, pattern=r"^home$"))
         app.add_handler(CallbackQueryHandler(self.handle_menu_bus, pattern=r"^act:bus$"))
         app.add_handler(CallbackQueryHandler(
             self.handle_menu_action,
@@ -496,6 +497,20 @@ class YKBot:
             await query.edit_message_text(
                 "What would you like to do?", reply_markup=self._menu_markup(update, account_id)
             )
+
+    async def handle_menu_home(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Posts a FRESH menu message rather than editing. The 🏠 button sits
+        on result messages, so editing would replace the result the user just
+        asked for — the opposite of what the button is for."""
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        await update.effective_message.reply_text(
+            "What would you like to do?", reply_markup=self._menu_markup(update, account_id)
+        )
 
     async def handle_menu_bus(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query

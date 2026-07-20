@@ -64,3 +64,11 @@ def confirm_keyboard(token: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton("✅ Yes", callback_data=f"cfm:{token}"),
         InlineKeyboardButton("❌ No", callback_data=f"cxl:{token}"),
     ]])
+
+
+def home_keyboard() -> InlineKeyboardMarkup:
+    """A lone 🏠 Menu button for results produced from the button menu, so
+    they aren't dead ends. Its callback_data is deliberately NOT menu:root:
+    that one navigates by editing the message in place, which would destroy
+    the very result this button is attached to."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu", callback_data="home")]])
