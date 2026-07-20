@@ -702,21 +702,28 @@ service locator, and it must not accumulate logic of its own.
 from dataclasses import dataclass
 from typing import Callable
 
+from ykbot.accounts import AccountStore, AllowlistStore
+from ykbot.bus import BusStopsCache, LtaBusClient
+from ykbot.claude import ClaudeClient
 from ykbot.config import Config
+from ykbot.message_log import MessageLogStore
+from ykbot.trivia import TriviaBook
 
 
 @dataclass(frozen=True)
 class BotServices:
     config: Config
 
-    # Singleton stores and clients.
-    accounts: object
-    allowlist: object
-    claude: object
-    trivia: object
-    lta: object
-    stops: object
-    message_log: object
+    # Singleton stores and clients. Concrete types, not `object`: none of
+    # these modules import this one, so there is no import cycle, and a
+    # precise type is the whole point of a dependency bundle.
+    accounts: AccountStore
+    allowlist: AllowlistStore
+    claude: ClaudeClient
+    trivia: TriviaBook
+    lta: LtaBusClient
+    stops: BusStopsCache
+    message_log: MessageLogStore
 
     # Per-account store factories.
     interests_for: Callable
