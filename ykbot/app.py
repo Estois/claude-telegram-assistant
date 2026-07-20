@@ -1439,17 +1439,39 @@ class YKBot:
             finally:
                 keep_typing.cancel()
 
-    async def _send_formatted(self, update: Update, text: str) -> None:
+    async def _reply_result(
+        self, update: Update, text: str, from_menu: bool, **kwargs
+    ) -> None:
+        """Sends a result reply, attaching the 🏠 Menu button when the action
+        was started from the button menu. Slash-command results stay bare — if
+        you're already typing commands you don't need a button to reach the
+        menu. Always replies via effective_message: results from a button flow
+        can arrive on an update whose .message is None."""
+        await update.effective_message.reply_text(
+            text,
+            reply_markup=menus.home_keyboard() if from_menu else None,
+            **kwargs,
+        )
+
+    async def _send_formatted(self, update: Update, text: str, from_menu: bool = False) -> None:
         """Sends Claude's reply, chunked for Telegram's message limit. Tries
         HTML formatting first and falls back to plain text per chunk if the
         markup doesn't parse — LLM-generated tags aren't guaranteed
-        well-formed, so a broken reply must never mean a lost reply."""
-        for chunk in TelegramFormatter.chunk(text):
+        well-formed, so a broken reply must never mean a lost reply.
+
+        The 🏠 Menu button goes on the LAST chunk only, so a multi-chunk digest
+        ends with one button rather than one per message."""
+        chunks = TelegramFormatter.chunk(text)
+        for index, chunk in enumerate(chunks):
+            last = index == len(chunks) - 1
+            markup = menus.home_keyboard() if (from_menu and last) else None
             try:
-                await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
+                await update.effective_message.reply_text(
+                    chunk, parse_mode=ParseMode.HTML, reply_markup=markup
+                )
             except BadRequest:
                 logger.warning("Telegram rejected HTML formatting, sending chunk as plain text")
-                await update.effective_message.reply_text(chunk)
+                await update.effective_message.reply_text(chunk, reply_markup=markup)
 
     @staticmethod
     async def _keep_typing(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
