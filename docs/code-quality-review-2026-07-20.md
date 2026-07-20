@@ -1,11 +1,15 @@
 # Code quality review — 2026-07-20
 
-> **STATUS — updated 2026-07-20, same day.** Findings 1, 2, 3, 6, 7, 8, 9 and 10
-> are **DONE** (commits `18f88a3`, `12b758b`, and the CI commit). Suite went
-> 443 → 457 tests, still 100% coverage.
+> **STATUS — updated 2026-07-20, same day.** Findings 1, 2, 3, 5, 6, 7, 8, 9 and
+> 10 are **DONE** (commits `18f88a3`, `12b758b`, the CI commit, and the
+> `app-decomposition` branch's Piece 1, which wrapped every store call site in
+> `asyncio.to_thread`). Suite went 443 → 473 tests, still 100% coverage.
 >
-> **Findings 4 and 5 are NOT done** and are the only open items — see the
-> per-finding notes below, which have been updated with what remains.
+> **Finding 4 is PARTLY DONE.** The `app-decomposition` branch's Piece 2
+> extracted the bus domain into `ykbot/handlers/bus.py`, taking it behind a new
+> `BotServices` bundle (`ykbot/services.py`). The interests, admin, news, and
+> menu domains still live in `app.py` — see the per-finding note below for what
+> remains.
 >
 > **One deliberate omission:** the exposed token has **not been rotated**. The
 > user was told and chose to defer it. The *logging* leak is fixed, but the
@@ -176,7 +180,7 @@ or a `NullHandler` in the test bootstrap rather than reverting this.
 
 ---
 
-## 4. MEDIUM — OPEN — `YKBot` is a 99-method god object in a 1605-line module
+## 4. MEDIUM — PARTLY DONE (bus extracted) — YKBot is a god object
 
 **Where:** `ykbot/app.py` — 1605 lines, `class YKBot` carrying 99 methods.
 
@@ -216,7 +220,7 @@ refactor was done.
 
 ---
 
-## 5. MEDIUM — OPEN (deliberately deferred) — Blocking file I/O in async handlers
+## 5. ~~MEDIUM~~ DONE — Blocking file I/O in async handlers
 
 **Where:** every store. `accounts.py:207,239,278,281,288`, `bus.py:97,125,151`,
 `interests.py:24,74`, `message_log.py:32`, `news_history.py:24,50,56`,

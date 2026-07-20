@@ -123,6 +123,23 @@ re-check admin) exactly like the slash command it mirrors — a button only
 being visible to the right session doesn't mean the underlying handler
 trusts that; it never does.
 
+### Code layout
+
+`bot.py` is a thin entry-point shim; the implementation lives in `ykbot/`.
+Service classes (accounts, claude, interests, bus, trivia, formatting, menus)
+each own one concern. `ykbot/app.py` holds the `YKBot` orchestrator: wiring,
+handler registration, the command list, auth, and the shared reply helpers.
+
+Per-domain handlers live in `ykbot/handlers/`. Each takes a `BotServices`
+(`ykbot/services.py`) — the shared bundle of config, stores and helpers — so
+the dependency direction is one-way and a handler class never references
+`YKBot`. Bus is extracted this way; the other domains still sit in `app.py`.
+
+Stores are synchronous and read from disk per request, so hand-edits to data
+files apply without a restart. Handlers therefore call them through
+`asyncio.to_thread` to keep the event loop free, and keyboard builders take
+plain data rather than fetching their own.
+
 ## Accounts
 
 Every command is gated behind a password — even ones like `/help` or
