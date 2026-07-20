@@ -9,11 +9,14 @@ services:
       - TZ=Asia/Singapore
     volumes:
       # Whole repo, so bot.py picks up gitignored/hand-edited files
-      # (password.hash, bus_locations.json, interests.md, sessions.json,
-      # trivia_cache.json, ...) at their default paths, and code edits show
-      # up on the next `docker compose restart` with no rebuild needed.
+      # (accounts.hash, accounts/<id>/interests.md + bus_locations.json,
+      # trivia_cache.json, bus_stops_cache.json, message_logs/, ...) at their
+      # default paths, and code edits show up on the next
+      # `docker compose restart` with no rebuild needed.
       - .:/app
       # Claude Code auth (.credentials.json), global settings.json, and
       # personal skills under ~/.claude/skills — shared with the host so the
-      # container doesn't need its own `claude auth login`.
-      - ~/.claude:/root/.claude
+      # container doesn't need its own `claude auth login`. ${HOME}, not
+      # `~`: Compose only interpolates ${VAR} syntax, it does not perform
+      # shell tilde expansion on volume source paths.
+      - ${HOME}/.claude:/root/.claude
