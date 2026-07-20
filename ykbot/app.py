@@ -610,7 +610,7 @@ class YKBot:
             return
         await query.answer()
         action = query.data.split(":", 1)[1]  # "rm" or "upd"
-        entries = self._interests_for(account_id).list()
+        entries = await asyncio.to_thread(self._interests_for(account_id).list)
         if not entries:
             await query.edit_message_text(
                 "No interests saved yet.", reply_markup=menus.interests_keyboard()
@@ -632,7 +632,7 @@ class YKBot:
         action, index_str = query.data.split(":")[0].split("_")[1], query.data.split(":", 1)[1]
         index = int(index_str)
         if action == "rm":
-            entry = self._interests_for(account_id).list()
+            entry = await asyncio.to_thread(self._interests_for(account_id).list)
             label = entry[index - 1] if 1 <= index <= len(entry) else f"#{index}"
             await query.edit_message_text(
                 f'Delete interest #{index}: "{label}"?',
@@ -699,7 +699,7 @@ class YKBot:
     ) -> None:
         if self._config.news_learning_enabled:
             try:
-                self._news_history_for(account_id).append(subject)
+                await asyncio.to_thread(self._news_history_for(account_id).append, subject)
             except Exception:
                 # Logging the subject must never break the digest reply.
                 logger.exception("Failed to log /news subject for %s", account_id)
@@ -782,7 +782,7 @@ class YKBot:
     async def _do_add_interest(
         self, update: Update, account_id: str, text: str, from_menu: bool = False
     ) -> None:
-        index = self._interests_for(account_id).add(text)
+        index = await asyncio.to_thread(self._interests_for(account_id).add, text)
         await self._reply_result(update, f"Added as interest #{index}.", from_menu)
 
     async def handle_get_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -794,7 +794,7 @@ class YKBot:
     async def _do_show_interests(
         self, update: Update, account_id: str, from_menu: bool = False
     ) -> None:
-        entries = self._interests_for(account_id).list()
+        entries = await asyncio.to_thread(self._interests_for(account_id).list)
         if not entries:
             await self._reply_result(
                 update, "No interests saved yet. Add one with /addinterests <topic>.", from_menu
@@ -821,7 +821,7 @@ class YKBot:
 
         index = int(index_arg)
         interests = self._interests_for(account_id)
-        entries = interests.list()
+        entries = await asyncio.to_thread(interests.list)
         if not entries:
             await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
             return
@@ -843,13 +843,13 @@ class YKBot:
         from_menu: bool = False,
     ) -> None:
         interests = self._interests_for(account_id)
-        entries = interests.list()
+        entries = await asyncio.to_thread(interests.list)
         prompt = self._build_update_interest_prompt(entries[index - 1], text)
         new_text = await self._run_claude(update, context, prompt)
         if new_text is None:
             return
 
-        interests.update(index, new_text)
+        await asyncio.to_thread(interests.update, index, new_text)
         await self._reply_result(update, f"Updated interest #{index}.", from_menu)
 
     async def handle_remove_interest(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -865,7 +865,7 @@ class YKBot:
             return
 
         interests = self._interests_for(account_id)
-        if not interests.list():
+        if not await asyncio.to_thread(interests.list):
             await update.message.reply_text("No interests saved yet. Add one with /addinterests <topic>.")
             return
 
@@ -875,11 +875,12 @@ class YKBot:
         self, update: Update, account_id: str, index: int, from_menu: bool = False
     ) -> None:
         interests = self._interests_for(account_id)
-        removed = interests.remove(index)
+        removed = await asyncio.to_thread(interests.remove, index)
         if removed is None:
+            remaining = await asyncio.to_thread(interests.list)
             await self._reply_result(
                 update,
-                f"No interest #{index}. Valid range: 1-{len(interests.list())}. See /getinterests.",
+                f"No interest #{index}. Valid range: 1-{len(remaining)}. See /getinterests.",
                 from_menu,
             )
             return
@@ -902,7 +903,7 @@ class YKBot:
         from_menu: bool = False,
     ) -> None:
         interests = self._interests_for(account_id)
-        entries = interests.list()
+        entries = await asyncio.to_thread(interests.list)
         theme_counts = await self._recent_theme_counts(account_id)
         if len(entries) < 2 and not theme_counts:
             await self._reply_result(
@@ -924,7 +925,7 @@ class YKBot:
             )
             return
 
-        interests.replace_all(new_entries)
+        await asyncio.to_thread(interests.replace_all, new_entries)
         summary = f"🗂 Reorganized interests: {len(entries)} → {len(new_entries)} entries."
         await self._reply_result(
             update, f"{summary}\n\n{self._format_interests_listing(new_entries)}", from_menu
@@ -958,7 +959,7 @@ class YKBot:
             )
             return
 
-        created = self._accounts.add_hash(name, password_hash)
+        created = await asyncio.to_thread(self._accounts.add_hash, name, password_hash)
         await update.message.reply_text(
             f"Created account '{name}' with 1 password."
             if created
@@ -979,7 +980,7 @@ class YKBot:
         if name == self._config.admin_account_id:
             await self._reply_result(update, "Refusing to remove the admin account.", from_menu)
             return
-        removed = self._accounts.remove_account(name)
+        removed = await asyncio.to_thread(self._accounts.remove_account, name)
         await self._reply_result(
             update,
             f"Removed account '{name}'." if removed else f"No account named '{name}'.",
@@ -1063,7 +1064,8 @@ class YKBot:
             await query.answer()
             return
         await query.answer()
-        accounts = [a for a in self._accounts.list_ids() if a != self._config.admin_account_id]
+        account_ids = await asyncio.to_thread(self._accounts.list_ids)
+        accounts = [a for a in account_ids if a != self._config.admin_account_id]
         if not accounts:
             await self._safe_edit(query, "No removable accounts.", reply_markup=menus.admin_keyboard())
             return
@@ -1206,7 +1208,7 @@ class YKBot:
         await query.answer()
         stop_code = query.data.split(":", 1)[1]
         name = self._describe_stop(stop_code)
-        self._bus_locations_for(account_id).add(name, stop_code)
+        await asyncio.to_thread(self._bus_locations_for(account_id).add, name, stop_code)
 
         text = await self._render_arrivals(stop_code, prefix=f'⭐ Added "{name}" to preferred stops.\n\n')
         markup = await self._arrivals_keyboard_for(stop_code, account_id)
@@ -1224,7 +1226,7 @@ class YKBot:
 
         await query.answer()
         stop_code = query.data.split(":", 1)[1]
-        self._bus_locations_for(account_id).remove_by_code(stop_code)
+        await asyncio.to_thread(self._bus_locations_for(account_id).remove_by_code, stop_code)
 
         text = await self._render_arrivals(stop_code, prefix="🗑 Removed from preferred stops.\n\n")
         markup = await self._arrivals_keyboard_for(stop_code, account_id)
@@ -1260,7 +1262,7 @@ class YKBot:
                 "(e.g. 46009). Open /bus and tap “➕ Add a stop by code” to try again."
             )
             return
-        if self._bus_locations_for(account_id).has_code(code):
+        if await asyncio.to_thread(self._bus_locations_for(account_id).has_code, code):
             await update.message.reply_text(
                 f'"{self._describe_stop(code)}" is already in your preferred stops.'
             )
@@ -1292,7 +1294,7 @@ class YKBot:
         await query.answer()
         stop_code = query.data.split(":", 1)[1]
         name = self._describe_stop(stop_code)
-        self._bus_locations_for(account_id).add(name, stop_code)
+        await asyncio.to_thread(self._bus_locations_for(account_id).add, name, stop_code)
 
         text = await self._render_arrivals(stop_code, prefix=f'⭐ Added "{name}" to preferred stops.\n\n')
         markup = await self._arrivals_keyboard_for(stop_code, account_id)
@@ -1415,7 +1417,7 @@ class YKBot:
                 await self._do_add_user_tele_id(update, text, from_menu=True)
         elif kind == "update_interest":
             index = awaiting["payload"]["index"]
-            entries = self._interests_for(account_id).list()
+            entries = await asyncio.to_thread(self._interests_for(account_id).list)
             if 1 <= index <= len(entries):
                 await self._do_update_interest(
                     update, context, account_id, index, text.strip(), from_menu=True
@@ -1485,7 +1487,7 @@ class YKBot:
             return
         user = update.effective_user
         text = message.text if message.text is not None else "[non-text message]"
-        self._message_log.log(user.username, user.id, text)
+        await asyncio.to_thread(self._message_log.log, user.username, user.id, text)
 
     # -- Claude dispatch ----------------------------------------------------
 
@@ -1627,7 +1629,8 @@ class YKBot:
             pass
 
     async def _reorganize_interests(self) -> None:
-        for account_id in self._accounts.list_ids():
+        account_ids = await asyncio.to_thread(self._accounts.list_ids)
+        for account_id in account_ids:
             try:
                 await self._reorganize_account(account_id)
             except Exception:
@@ -1643,7 +1646,7 @@ class YKBot:
         maintenance_key = self._maintenance_key(account_id)
         async with self._claude.lock_for(maintenance_key):
             interests = self._interests_for(account_id)
-            entries = interests.list()
+            entries = await asyncio.to_thread(interests.list)
             theme_counts = await self._recent_theme_counts(account_id)
 
             # Nothing to do without either enough interests to reorganize or any
@@ -1660,7 +1663,7 @@ class YKBot:
                     account_id,
                 )
             else:
-                interests.replace_all(new_entries)
+                await asyncio.to_thread(interests.replace_all, new_entries)
                 logger.info(
                     "Reorganized interests for %s: %d -> %d entries",
                     account_id, len(entries), len(new_entries),
@@ -1669,7 +1672,8 @@ class YKBot:
             # Prune the log to the window after the daily pass (the manual
             # /compileinterests path deliberately does not prune).
             if self._config.news_learning_enabled:
-                self._news_history_for(account_id).prune(
+                await asyncio.to_thread(
+                    self._news_history_for(account_id).prune,
                     self._config.news_history_window_days,
                     self._config.news_history_max_entries,
                 )
