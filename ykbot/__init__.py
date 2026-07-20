@@ -22,6 +22,7 @@ from ykbot.formatting import CommandSpec, TelegramFormatter
 from ykbot.interests import InterestsStore
 from ykbot.message_log import MessageLogStore
 from ykbot.news_history import NewsHistoryStore
+from ykbot.services import BotServices
 from ykbot.trivia import FALLBACK_TRIVIA, AnimalEmoji, TriviaBook
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "BusStopsCache",
     "BusLocationsStore",
     "CommandSpec",
+    "BotServices",
     "YKBot",
     "main",
     "configure_logging",

@@ -35,6 +35,7 @@ from ykbot.interests import InterestsStore
 from ykbot.message_log import MessageLogStore
 from ykbot.news_history import NewsHistoryStore
 from ykbot import menus
+from ykbot.services import BotServices
 from ykbot.trivia import FALLBACK_TRIVIA, TriviaBook
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -92,6 +93,27 @@ class YKBot:
         self._message_log = MessageLogStore(config.message_logs_dir)
         self._command_specs = self._build_command_specs()
         self._reorganize_task: Optional[asyncio.Task] = None
+
+        self.services = BotServices(
+            config=self._config,
+            accounts=self._accounts,
+            allowlist=self._allowlist,
+            claude=self._claude,
+            trivia=self._trivia,
+            lta=self._lta,
+            stops=self._bus_stops,
+            message_log=self._message_log,
+            interests_for=self._interests_for,
+            bus_locations_for=self._bus_locations_for,
+            news_history_for=self._news_history_for,
+            require_session=self._require_session,
+            require_admin=self._require_admin,
+            is_admin=self._is_admin,
+            reply_result=self._reply_result,
+            send_formatted=self._send_formatted,
+            run_claude=self._run_claude,
+            safe_edit=self._safe_edit,
+        )
 
     def _account_dir(self, account_id: str) -> Path:
         path = self._config.accounts_dir / account_id
