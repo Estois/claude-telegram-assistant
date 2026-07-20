@@ -1,4 +1,26 @@
+[project]
+name = "yk-custom-bot"
+version = "1.0.0"
+description = "A password-gated Telegram bot that runs Claude Code for news digests, interests, and Singapore bus arrivals."
+requires-python = ">=3.12"
+
+# Runtime dependencies deliberately stay in requirements.txt rather than
+# moving here. This project is deployed by checking out the repo and running
+# `python bot.py` (or the docker-compose bind-mount) — it is never pip-installed
+# as a package, so there is no [build-system] and nothing consumes a
+# dependency list here. Duplicating the pins would just create two places to
+# forget. requirements.txt is the single source of truth; this table exists for
+# the metadata (name, version, Python floor) that had no home before.
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["ykbot", "bot"]
+
+[tool.coverage.report]
+# The suite has been at 100% since 2026-07-19; CI enforces it. Keep it there.
+fail_under = 100
+show_missing = true

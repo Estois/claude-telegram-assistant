@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt pyflakes coverage
+
+      - name: Static gate
+        run: python -m pyflakes bot.py ykbot/
+
+      - name: Import smoke
+        run: python -c "import bot"
+
+      - name: Tests with coverage
+        run: python -m coverage run --source=ykbot,bot -m unittest discover -s tests -t .
+
+      # The suite has been at 100% since 2026-07-19 and every feature since has
+      # kept it there. Enforcing it turns that norm into an invariant.
+      - name: Coverage must stay at 100%
+        run: python -m coverage report -m --fail-under=100
