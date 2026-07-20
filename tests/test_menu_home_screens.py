@@ -19,7 +19,7 @@ class BusMenuHomeTests(AsyncBotTestCase):
 
     def test_fav_menu_has_home_row(self):
         b = self._make_bot()
-        _text, markup = b._build_fav_menu("alice")
+        _text, markup = b._build_fav_menu({})
         self.assertIn("home", datas(markup))
 
     def test_near_menu_has_home_row(self):

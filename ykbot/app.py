@@ -1085,11 +1085,14 @@ class YKBot:
         self, update: Update, context: ContextTypes.DEFAULT_TYPE, account_id: str
     ) -> None:
         context.user_data["bus_menu"] = {"kind": "fav"}
-        text, markup = self._build_fav_menu(account_id)
+        locations = await asyncio.to_thread(self._bus_locations_for(account_id).list)
+        text, markup = self._build_fav_menu(locations)
         await update.effective_message.reply_text(text, reply_markup=markup)
 
-    def _build_fav_menu(self, account_id: str) -> "tuple[str, InlineKeyboardMarkup]":
-        locations = self._bus_locations_for(account_id).list()
+    def _build_fav_menu(self, locations: dict) -> "tuple[str, InlineKeyboardMarkup]":
+        """Pure: takes the saved stops rather than reading them. A sync
+        builder cannot await, so the disk read has to happen in the async
+        caller — same shape as _build_near_menu and everything in menus.py."""
         buttons = [
             [InlineKeyboardButton(name, callback_data=f"bus_stop:{code}")]
             for name, code in locations.items()
@@ -1140,7 +1143,8 @@ class YKBot:
         await query.answer()
         stop_code = query.data.split(":", 1)[1]
         text = await self._render_arrivals(stop_code)
-        await query.edit_message_text(text, reply_markup=self._build_arrivals_keyboard(stop_code, account_id))
+        markup = await self._arrivals_keyboard_for(stop_code, account_id)
+        await query.edit_message_text(text, reply_markup=markup)
 
     async def _render_arrivals(self, stop_code: str, prefix: str = "") -> str:
         """Arrival times for a stop, plus a refresh timestamp footer. The
@@ -1160,7 +1164,8 @@ class YKBot:
         await query.answer("Refreshed")
         stop_code = query.data.split(":", 1)[1]
         text = await self._render_arrivals(stop_code)
-        await query.edit_message_text(text, reply_markup=self._build_arrivals_keyboard(stop_code, account_id))
+        markup = await self._arrivals_keyboard_for(stop_code, account_id)
+        await query.edit_message_text(text, reply_markup=markup)
 
     async def handle_bus_back(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -1174,11 +1179,13 @@ class YKBot:
         if menu and menu.get("kind") == "near" and menu.get("stops"):
             text, markup = self._build_near_menu(menu["stops"])
         elif menu and menu.get("kind") == "fav":
-            text, markup = self._build_fav_menu(account_id)
+            locations = await asyncio.to_thread(self._bus_locations_for(account_id).list)
+            text, markup = self._build_fav_menu(locations)
         else:
             # Navigation state was lost (e.g. the bot restarted since the menu
             # was shown) — fall back to the always-available preferred menu.
-            text, markup = self._build_fav_menu(account_id)
+            locations = await asyncio.to_thread(self._bus_locations_for(account_id).list)
+            text, markup = self._build_fav_menu(locations)
             text = f"Menu expired — {text[0].lower()}{text[1:]}"
         await query.edit_message_text(text, reply_markup=markup)
 
@@ -1195,9 +1202,10 @@ class YKBot:
         self._bus_locations_for(account_id).add(name, stop_code)
 
         text = await self._render_arrivals(stop_code, prefix=f'⭐ Added "{name}" to preferred stops.\n\n')
+        markup = await self._arrivals_keyboard_for(stop_code, account_id)
         await query.edit_message_text(
             text,
-            reply_markup=self._build_arrivals_keyboard(stop_code, account_id),
+            reply_markup=markup,
         )
 
     async def handle_bus_fav_remove(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1212,9 +1220,10 @@ class YKBot:
         self._bus_locations_for(account_id).remove_by_code(stop_code)
 
         text = await self._render_arrivals(stop_code, prefix="🗑 Removed from preferred stops.\n\n")
+        markup = await self._arrivals_keyboard_for(stop_code, account_id)
         await query.edit_message_text(
             text,
-            reply_markup=self._build_arrivals_keyboard(stop_code, account_id),
+            reply_markup=markup,
         )
 
     async def handle_bus_add_by_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1279,9 +1288,8 @@ class YKBot:
         self._bus_locations_for(account_id).add(name, stop_code)
 
         text = await self._render_arrivals(stop_code, prefix=f'⭐ Added "{name}" to preferred stops.\n\n')
-        await query.edit_message_text(
-            text, reply_markup=self._build_arrivals_keyboard(stop_code, account_id)
-        )
+        markup = await self._arrivals_keyboard_for(stop_code, account_id)
+        await query.edit_message_text(text, reply_markup=markup)
 
     async def handle_bus_cancel_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -1297,8 +1305,10 @@ class YKBot:
             return f"{stop['Description']} ({stop_code})"
         return f"Stop {stop_code}"
 
-    def _build_arrivals_keyboard(self, stop_code: str, account_id: str) -> InlineKeyboardMarkup:
-        if self._bus_locations_for(account_id).has_code(stop_code):
+    def _build_arrivals_keyboard(self, stop_code: str, is_favorite: bool) -> InlineKeyboardMarkup:
+        """Pure: takes whether the stop is already saved rather than looking
+        it up, so the caller can do that read off the event loop."""
+        if is_favorite:
             fav_button = InlineKeyboardButton(
                 "🗑 Remove from preferred", callback_data=f"bus_fav_remove:{stop_code}"
             )
@@ -1311,6 +1321,14 @@ class YKBot:
             InlineKeyboardButton("⬅️ Back", callback_data="bus_back"),
         ]
         return InlineKeyboardMarkup([nav_row, [fav_button]])
+
+    async def _arrivals_keyboard_for(self, stop_code: str, account_id: str) -> InlineKeyboardMarkup:
+        """Async fetcher: does the store read off the event loop, then hands
+        plain data to the pure builder."""
+        is_favorite = await asyncio.to_thread(
+            self._bus_locations_for(account_id).has_code, stop_code
+        )
+        return self._build_arrivals_keyboard(stop_code, is_favorite)
 
     async def handle_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self._require_session(update) is None:

@@ -1,0 +1,81 @@
+"""The keyboard builders take plain data and touch no store.
+
+A sync builder that reads from disk blocks the event loop and cannot be
+moved off it, because a `def` cannot await. Keeping them pure is also the
+convention already used by every builder in ykbot/menus.py.
+"""
+
+import unittest
+
+import bot
+from tests.helpers import BotTestCase, make_config
+
+
+def datas(markup):
+    return [b.callback_data for row in markup.inline_keyboard for b in row]
+
+
+class ExplodingStore:
+    """Any store access at all is a failure for a pure builder."""
+
+    def __getattr__(self, name):
+        raise AssertionError(f"pure builder touched the store: .{name}")
+
+
+class FavMenuBuilderTests(BotTestCase):
+    def _make_bot(self):
+        b = bot.YKBot(make_config(self.tmp_path))
+        b._bus_locations_for = lambda account_id: ExplodingStore()
+        return b
+
+    def test_takes_locations_and_touches_no_store(self):
+        b = self._make_bot()
+
+        text, markup = b._build_fav_menu({"Home": "46009"})
+
+        self.assertEqual(text, "Pick a stop:")
+        self.assertIn("bus_stop:46009", datas(markup))
+
+    def test_empty_locations_still_offers_location_and_add(self):
+        b = self._make_bot()
+
+        _text, markup = b._build_fav_menu({})
+
+        self.assertIn("bus_request_location", datas(markup))
+        self.assertIn("bus_addbycode", datas(markup))
+        self.assertIn("home", datas(markup))
+
+
+class ArrivalsKeyboardBuilderTests(BotTestCase):
+    def _make_bot(self):
+        b = bot.YKBot(make_config(self.tmp_path))
+        b._bus_locations_for = lambda account_id: ExplodingStore()
+        return b
+
+    def test_favorite_shows_remove_and_touches_no_store(self):
+        b = self._make_bot()
+
+        markup = b._build_arrivals_keyboard("46009", is_favorite=True)
+
+        self.assertIn("bus_fav_remove:46009", datas(markup))
+        self.assertNotIn("bus_fav_add:46009", datas(markup))
+
+    def test_non_favorite_shows_add(self):
+        b = self._make_bot()
+
+        markup = b._build_arrivals_keyboard("46009", is_favorite=False)
+
+        self.assertIn("bus_fav_add:46009", datas(markup))
+        self.assertNotIn("bus_fav_remove:46009", datas(markup))
+
+    def test_nav_row_is_unchanged(self):
+        b = self._make_bot()
+
+        markup = b._build_arrivals_keyboard("46009", is_favorite=False)
+
+        self.assertIn("bus_refresh:46009", datas(markup))
+        self.assertIn("bus_back", datas(markup))
+
+
+if __name__ == "__main__":
+    unittest.main()

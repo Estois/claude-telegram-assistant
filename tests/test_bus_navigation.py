@@ -24,7 +24,7 @@ class ArrivalsKeyboardTests(BotTestCase):
     def test_keyboard_has_refresh_back_and_favorite_buttons(self):
         news_bot = self._make_bot()
 
-        markup = news_bot._build_arrivals_keyboard("46009", "alice")
+        markup = news_bot._build_arrivals_keyboard("46009", is_favorite=False)
 
         datas = callback_datas(markup)
         self.assertIn("bus_refresh:46009", datas)
@@ -35,7 +35,7 @@ class ArrivalsKeyboardTests(BotTestCase):
         news_bot = self._make_bot()
         news_bot._bus_locations_for("alice").add("Home", "46009")
 
-        markup = news_bot._build_arrivals_keyboard("46009", "alice")
+        markup = news_bot._build_arrivals_keyboard("46009", is_favorite=True)
 
         datas = callback_datas(markup)
         self.assertIn("bus_fav_remove:46009", datas)
@@ -53,7 +53,7 @@ class MenuBuilderTests(BotTestCase):
         news_bot = self._make_bot()
         news_bot._bus_locations_for("alice").add("Home", "46009")
 
-        text, markup = news_bot._build_fav_menu("alice")
+        text, markup = news_bot._build_fav_menu(news_bot._bus_locations_for("alice").list())
 
         self.assertEqual(text, "Pick a stop:")
         self.assertIn("bus_stop:46009", callback_datas(markup))
@@ -166,7 +166,7 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
     def test_bus_menu_has_add_by_code_button(self):
         news_bot = self._make_bot()
 
-        _, markup = news_bot._build_fav_menu("alice")
+        _, markup = news_bot._build_fav_menu({})
 
         self.assertIn("bus_addbycode", callback_datas(markup))
 
