@@ -206,3 +206,36 @@ class CallbackSafetyTests(AsyncBotTestCase):
         self.assertTrue(update.effective_message.replies, "expected a trivia reply")
         self.assertIn("fact:", update.effective_message.replies[0])
         self.assertIsNone(update.message)
+
+
+class BusHandlerCallbackSafetyTests(AsyncBotTestCase):
+    """The bus handlers moved modules; re-pin that they still reply via
+    effective_message. A real callback update has message = None."""
+
+    CHAT_ID = 9100
+
+    def _make_bot(self):
+        b = bot.YKBot(make_config(self.tmp_path))
+        write_accounts_file(b._config.accounts_file, {"alice": ["pw"]})
+        b._accounts.try_unlock(chat_id=self.CHAT_ID, attempt="pw")
+        return b
+
+    async def test_bus_back_replies_without_a_message(self):
+        b = self._make_bot()
+        update = FakeUpdate(
+            user_id=1, chat_id=self.CHAT_ID, callback_only=True, callback_data="bus_back"
+        )
+
+        await b._bus.handle_bus_back(update, FakeContext())
+
+        self.assertIsNone(update.message)
+
+    async def test_bus_add_by_code_replies_without_a_message(self):
+        b = self._make_bot()
+        update = FakeUpdate(
+            user_id=1, chat_id=self.CHAT_ID, callback_only=True, callback_data="bus_addbycode"
+        )
+
+        await b._bus.handle_bus_add_by_code(update, FakeContext())
+
+        self.assertIsNone(update.message)

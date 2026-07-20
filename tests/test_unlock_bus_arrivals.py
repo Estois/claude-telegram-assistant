@@ -86,7 +86,7 @@ class BusCallbackTests(AsyncBotTestCase):
         async def fake_arrivals(stop_code):
             return f"Arrivals for {stop_code}"
 
-        news_bot._format_arrivals = fake_arrivals
+        news_bot._bus._format_arrivals = fake_arrivals
         return news_bot
 
     def _update(self, callback_data):
@@ -96,7 +96,7 @@ class BusCallbackTests(AsyncBotTestCase):
         news_bot = self._make_bot()
         update = self._update("bus_stop:46009")
 
-        await news_bot.handle_bus_callback(update, FakeContext())
+        await news_bot._bus.handle_bus_callback(update, FakeContext())
 
         text = update.callback_query.last_text
         self.assertTrue(text.startswith("Arrivals for 46009"))
@@ -113,7 +113,7 @@ class BusCallbackTests(AsyncBotTestCase):
         news_bot = self._make_bot()
         update = self._update("bus_fav_add:46009")
 
-        await news_bot.handle_bus_fav_add(update, FakeContext())
+        await news_bot._bus.handle_bus_fav_add(update, FakeContext())
 
         self.assertTrue(news_bot._bus_locations_for("alice").has_code("46009"))
         self.assertTrue(update.callback_query.last_text.startswith("⭐ Added"))
@@ -123,7 +123,7 @@ class BusCallbackTests(AsyncBotTestCase):
         news_bot._bus_locations_for("alice").add("Home", "46009")
         update = self._update("bus_fav_remove:46009")
 
-        await news_bot.handle_bus_fav_remove(update, FakeContext())
+        await news_bot._bus.handle_bus_fav_remove(update, FakeContext())
 
         self.assertFalse(news_bot._bus_locations_for("alice").has_code("46009"))
         self.assertTrue(update.callback_query.last_text.startswith("🗑 Removed"))
@@ -136,18 +136,22 @@ class ArrivalsFormattingTests(AsyncBotTestCase):
     async def test_reports_when_lta_is_not_configured(self):
         news_bot = self._make_bot()  # lta_api_key None by default
 
-        text = await news_bot._format_arrivals("46009")
+        text = await news_bot._bus._format_arrivals("46009")
 
         self.assertIn("LTA_API_KEY is not configured", text)
 
     async def test_formats_service_arrival_lines(self):
         news_bot = self._make_bot()
-        news_bot._lta = _FakeLta(
-            configured=True,
-            services=[{"service_no": "71", "arrivals": ["3 min", "9 min"]}],
+        object.__setattr__(
+            news_bot.services,
+            "lta",
+            _FakeLta(
+                configured=True,
+                services=[{"service_no": "71", "arrivals": ["3 min", "9 min"]}],
+            ),
         )
 
-        text = await news_bot._format_arrivals("46009")
+        text = await news_bot._bus._format_arrivals("46009")
 
         self.assertIn("🚌 Stop 46009", text)
         self.assertIn("Svc 71: 3 min, 9 min", text)
@@ -164,23 +168,27 @@ class LocationHandlerTests(AsyncBotTestCase):
 
     async def test_reports_when_nearby_lookup_is_unavailable(self):
         news_bot = self._make_bot()
-        news_bot._bus_stops = _FakeBusStops(available=False)
+        object.__setattr__(news_bot.services, "stops", _FakeBusStops(available=False))
         update = FakeUpdate(user_id=100, chat_id=self.CHAT_ID, location=_Loc(1.3, 103.8))
 
-        await news_bot.handle_location(update, FakeContext())
+        await news_bot._bus.handle_location(update, FakeContext())
 
         self.assertIn("isn't set up yet", update.message.replies[0])
 
     async def test_shows_nearest_stops_and_records_near_context(self):
         news_bot = self._make_bot()
-        news_bot._bus_stops = _FakeBusStops(
-            available=True,
-            nearest=[{"Description": "Blk 1", "BusStopCode": "46009", "distance_m": 42.0}],
+        object.__setattr__(
+            news_bot.services,
+            "stops",
+            _FakeBusStops(
+                available=True,
+                nearest=[{"Description": "Blk 1", "BusStopCode": "46009", "distance_m": 42.0}],
+            ),
         )
         update = FakeUpdate(user_id=100, chat_id=self.CHAT_ID, location=_Loc(1.3, 103.8))
         ctx = FakeContext()
 
-        await news_bot.handle_location(update, ctx)
+        await news_bot._bus.handle_location(update, ctx)
 
         self.assertEqual(update.message.replies, ["Nearest stops:"])
         self.assertEqual(ctx.user_data["bus_menu"]["kind"], "near")

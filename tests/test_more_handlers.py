@@ -113,9 +113,9 @@ class FormatArrivalsBranchTests(HandlerTestBase):
             async def get_arrivals(self, code):
                 raise RuntimeError("network down")
 
-        news_bot._lta = Boom()
+        object.__setattr__(news_bot.services, "lta", Boom())
 
-        text = await news_bot._format_arrivals("46009")
+        text = await news_bot._bus._format_arrivals("46009")
 
         self.assertIn("Couldn't fetch arrival times", text)
 
@@ -128,9 +128,9 @@ class FormatArrivalsBranchTests(HandlerTestBase):
             async def get_arrivals(self, code):
                 return []
 
-        news_bot._lta = Empty()
+        object.__setattr__(news_bot.services, "lta", Empty())
 
-        text = await news_bot._format_arrivals("46009")
+        text = await news_bot._bus._format_arrivals("46009")
 
         self.assertIn("No bus data available", text)
 
@@ -221,7 +221,7 @@ class MiscBranchTests(HandlerTestBase):
         news_bot = self._make_bot()
         update = self._update(callback_data="bus_request_location")
 
-        await news_bot.handle_bus_request_location(update, FakeContext())
+        await news_bot._bus.handle_bus_request_location(update, FakeContext())
 
         self.assertIn("Reply to this message with your location", update.callback_query.last_text)
 
@@ -229,7 +229,7 @@ class MiscBranchTests(HandlerTestBase):
         news_bot = self._make_bot(unlock=False)
         update = self._update(callback_data="bus_stop:46009")
 
-        await news_bot.handle_bus_callback(update, FakeContext())
+        await news_bot._bus.handle_bus_callback(update, FakeContext())
 
         self.assertIn("fact:", update.message.replies[0])
         self.assertEqual(update.callback_query.edits, [])

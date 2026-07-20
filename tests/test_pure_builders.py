@@ -31,7 +31,7 @@ class FavMenuBuilderTests(BotTestCase):
     def test_takes_locations_and_touches_no_store(self):
         b = self._make_bot()
 
-        text, markup = b._build_fav_menu({"Home": "46009"})
+        text, markup = b._bus._build_fav_menu({"Home": "46009"})
 
         self.assertEqual(text, "Pick a stop:")
         self.assertIn("bus_stop:46009", datas(markup))
@@ -39,7 +39,7 @@ class FavMenuBuilderTests(BotTestCase):
     def test_empty_locations_still_offers_location_and_add(self):
         b = self._make_bot()
 
-        _text, markup = b._build_fav_menu({})
+        _text, markup = b._bus._build_fav_menu({})
 
         self.assertIn("bus_request_location", datas(markup))
         self.assertIn("bus_addbycode", datas(markup))
@@ -55,7 +55,7 @@ class ArrivalsKeyboardBuilderTests(BotTestCase):
     def test_favorite_shows_remove_and_touches_no_store(self):
         b = self._make_bot()
 
-        markup = b._build_arrivals_keyboard("46009", is_favorite=True)
+        markup = b._bus._build_arrivals_keyboard("46009", is_favorite=True)
 
         self.assertIn("bus_fav_remove:46009", datas(markup))
         self.assertNotIn("bus_fav_add:46009", datas(markup))
@@ -63,7 +63,7 @@ class ArrivalsKeyboardBuilderTests(BotTestCase):
     def test_non_favorite_shows_add(self):
         b = self._make_bot()
 
-        markup = b._build_arrivals_keyboard("46009", is_favorite=False)
+        markup = b._bus._build_arrivals_keyboard("46009", is_favorite=False)
 
         self.assertIn("bus_fav_add:46009", datas(markup))
         self.assertNotIn("bus_fav_remove:46009", datas(markup))
@@ -71,7 +71,7 @@ class ArrivalsKeyboardBuilderTests(BotTestCase):
     def test_nav_row_is_unchanged(self):
         b = self._make_bot()
 
-        markup = b._build_arrivals_keyboard("46009", is_favorite=False)
+        markup = b._bus._build_arrivals_keyboard("46009", is_favorite=False)
 
         self.assertIn("bus_refresh:46009", datas(markup))
         self.assertIn("bus_back", datas(markup))

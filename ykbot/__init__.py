@@ -19,6 +19,7 @@ from ykbot.bus import BusLocationsStore, BusStopsCache, LtaBusClient
 from ykbot.claude import ClaudeClient
 from ykbot.config import Config
 from ykbot.formatting import CommandSpec, TelegramFormatter
+from ykbot.handlers.bus import BusHandlers
 from ykbot.interests import InterestsStore
 from ykbot.message_log import MessageLogStore
 from ykbot.news_history import NewsHistoryStore
@@ -42,6 +43,7 @@ __all__ = [
     "BusLocationsStore",
     "CommandSpec",
     "BotServices",
+    "BusHandlers",
     "YKBot",
     "main",
     "configure_logging",

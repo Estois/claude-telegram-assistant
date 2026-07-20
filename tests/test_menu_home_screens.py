@@ -19,13 +19,13 @@ class BusMenuHomeTests(AsyncBotTestCase):
 
     def test_fav_menu_has_home_row(self):
         b = self._make_bot()
-        _text, markup = b._build_fav_menu({})
+        _text, markup = b._bus._build_fav_menu({})
         self.assertIn("home", datas(markup))
 
     def test_near_menu_has_home_row(self):
         b = self._make_bot()
         stops = [{"Description": "Opp Blk 1", "BusStopCode": "12345", "distance_m": 40}]
-        _text, markup = b._build_near_menu(stops)
+        _text, markup = b._bus._build_near_menu(stops)
         self.assertIn("home", datas(markup))
 
     async def test_slash_bus_also_gets_home(self):
@@ -34,7 +34,7 @@ class BusMenuHomeTests(AsyncBotTestCase):
         b = self._make_bot()
         update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID)
 
-        await b.handle_bus(update, FakeContext())
+        await b._bus.handle_bus(update, FakeContext())
 
         self.assertIn("home", datas(update.message.replies_markup[-1]))
 

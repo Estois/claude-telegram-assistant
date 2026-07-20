@@ -53,7 +53,7 @@ class ActionCoreTests(AsyncBotTestCase):
         ctx = FakeContext()
         update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID)
 
-        await b._open_bus_menu(update, ctx, "alice")
+        await b._bus.open_bus_menu(update, ctx, "alice")
 
         self.assertEqual(ctx.user_data["bus_menu"], {"kind": "fav"})
         self.assertTrue(update.message.replies)

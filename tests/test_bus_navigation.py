@@ -24,7 +24,7 @@ class ArrivalsKeyboardTests(BotTestCase):
     def test_keyboard_has_refresh_back_and_favorite_buttons(self):
         news_bot = self._make_bot()
 
-        markup = news_bot._build_arrivals_keyboard("46009", is_favorite=False)
+        markup = news_bot._bus._build_arrivals_keyboard("46009", is_favorite=False)
 
         datas = callback_datas(markup)
         self.assertIn("bus_refresh:46009", datas)
@@ -35,7 +35,7 @@ class ArrivalsKeyboardTests(BotTestCase):
         news_bot = self._make_bot()
         news_bot._bus_locations_for("alice").add("Home", "46009")
 
-        markup = news_bot._build_arrivals_keyboard("46009", is_favorite=True)
+        markup = news_bot._bus._build_arrivals_keyboard("46009", is_favorite=True)
 
         datas = callback_datas(markup)
         self.assertIn("bus_fav_remove:46009", datas)
@@ -53,7 +53,7 @@ class MenuBuilderTests(BotTestCase):
         news_bot = self._make_bot()
         news_bot._bus_locations_for("alice").add("Home", "46009")
 
-        text, markup = news_bot._build_fav_menu(news_bot._bus_locations_for("alice").list())
+        text, markup = news_bot._bus._build_fav_menu(news_bot._bus_locations_for("alice").list())
 
         self.assertEqual(text, "Pick a stop:")
         self.assertIn("bus_stop:46009", callback_datas(markup))
@@ -66,7 +66,7 @@ class MenuBuilderTests(BotTestCase):
             {"Description": "Blk 22", "BusStopCode": "46008", "distance_m": 120.9},
         ]
 
-        text, markup = news_bot._build_near_menu(stops)
+        text, markup = news_bot._bus._build_near_menu(stops)
 
         self.assertEqual(text, "Nearest stops:")
         self.assertEqual(
@@ -87,7 +87,7 @@ class _BusBotMixin:
         async def fake_arrivals(stop_code):
             return f"Arrivals for {stop_code}"
 
-        news_bot._format_arrivals = fake_arrivals
+        news_bot._bus._format_arrivals = fake_arrivals
         return news_bot
 
     def _update(self, callback_data=None):
@@ -100,7 +100,7 @@ class MenuContextTests(_BusBotMixin, AsyncBotTestCase):
         ctx = FakeContext()
         update = self._update()
 
-        await news_bot.handle_bus(update, ctx)
+        await news_bot._bus.handle_bus(update, ctx)
 
         self.assertEqual(ctx.user_data["bus_menu"], {"kind": "fav"})
         self.assertEqual(update.message.replies, ["Pick a stop:"])
@@ -111,7 +111,7 @@ class RefreshTests(_BusBotMixin, AsyncBotTestCase):
         news_bot = self._make_bot()
         update = self._update(callback_data="bus_refresh:46009")
 
-        await news_bot.handle_bus_refresh(update, FakeContext())
+        await news_bot._bus.handle_bus_refresh(update, FakeContext())
 
         text = update.callback_query.last_text
         self.assertTrue(text.startswith("Arrivals for 46009"))
@@ -126,7 +126,7 @@ class BackTests(_BusBotMixin, AsyncBotTestCase):
         ctx = FakeContext(user_data={"bus_menu": {"kind": "fav"}})
         update = self._update(callback_data="bus_back")
 
-        await news_bot.handle_bus_back(update, ctx)
+        await news_bot._bus.handle_bus_back(update, ctx)
 
         self.assertEqual(update.callback_query.last_text, "Pick a stop:")
         self.assertIn("bus_stop:46009", callback_datas(update.callback_query.last_markup))
@@ -137,7 +137,7 @@ class BackTests(_BusBotMixin, AsyncBotTestCase):
         ctx = FakeContext(user_data={"bus_menu": {"kind": "near", "stops": stops}})
         update = self._update(callback_data="bus_back")
 
-        await news_bot.handle_bus_back(update, ctx)
+        await news_bot._bus.handle_bus_back(update, ctx)
 
         self.assertEqual(update.callback_query.last_text, "Nearest stops:")
         self.assertIn("bus_stop:46009", callback_datas(update.callback_query.last_markup))
@@ -147,7 +147,7 @@ class BackTests(_BusBotMixin, AsyncBotTestCase):
         ctx = FakeContext()  # no bus_menu (e.g. bot restarted)
         update = self._update(callback_data="bus_back")
 
-        await news_bot.handle_bus_back(update, ctx)
+        await news_bot._bus.handle_bus_back(update, ctx)
 
         text = update.callback_query.last_text
         self.assertTrue(text.startswith("Menu expired"))
@@ -158,7 +158,7 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
     def test_confirm_keyboard_has_add_and_cancel(self):
         news_bot = self._make_bot()
 
-        datas = callback_datas(news_bot._build_add_confirm_keyboard("46009"))
+        datas = callback_datas(news_bot._bus._build_add_confirm_keyboard("46009"))
 
         self.assertIn("bus_confirmadd:46009", datas)
         self.assertIn("bus_cancel_add", datas)
@@ -166,7 +166,7 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
     def test_bus_menu_has_add_by_code_button(self):
         news_bot = self._make_bot()
 
-        _, markup = news_bot._build_fav_menu({})
+        _, markup = news_bot._bus._build_fav_menu({})
 
         self.assertIn("bus_addbycode", callback_datas(markup))
 
@@ -175,7 +175,7 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
         ctx = FakeContext()
         update = self._update(callback_data="bus_addbycode")
 
-        await news_bot.handle_bus_add_by_code(update, ctx)
+        await news_bot._bus.handle_bus_add_by_code(update, ctx)
 
         self.assertEqual(ctx.user_data["awaiting"], {"kind": "bus_code", "payload": {}})
         self.assertIn("code", update.callback_query.last_text.lower())
@@ -239,7 +239,7 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
         news_bot = self._make_bot()
         update = self._update(callback_data="bus_confirmadd:46009")
 
-        await news_bot.handle_bus_confirm_add(update, FakeContext())
+        await news_bot._bus.handle_bus_confirm_add(update, FakeContext())
 
         self.assertTrue(news_bot._bus_locations_for("alice").has_code("46009"))
         self.assertTrue(update.callback_query.last_text.startswith("⭐ Added"))
@@ -251,7 +251,7 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
         news_bot = self._make_bot()
         update = self._update(callback_data="bus_cancel_add")
 
-        await news_bot.handle_bus_cancel_add(update, FakeContext())
+        await news_bot._bus.handle_bus_cancel_add(update, FakeContext())
 
         self.assertIn("Cancelled", update.callback_query.last_text)
         self.assertFalse(news_bot._bus_locations_for("alice").has_code("46009"))

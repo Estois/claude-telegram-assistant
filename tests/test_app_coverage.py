@@ -157,7 +157,7 @@ class AdminAndBusGuardTests(AsyncBotTestCase):
         news_bot = self._make_bot()
         update = self._update()
 
-        await news_bot.handle_bus(update, FakeContext())
+        await news_bot._bus.handle_bus(update, FakeContext())
 
         self.assertIn("fact:", update.message.replies[0])
 
@@ -165,7 +165,7 @@ class AdminAndBusGuardTests(AsyncBotTestCase):
         news_bot = self._make_bot()
         update = self._update(callback_data="bus_request_location")
 
-        await news_bot.handle_bus_request_location(update, FakeContext())
+        await news_bot._bus.handle_bus_request_location(update, FakeContext())
 
         self.assertIn("fact:", update.message.replies[0])
         self.assertEqual(update.callback_query.edits, [])
@@ -174,7 +174,7 @@ class AdminAndBusGuardTests(AsyncBotTestCase):
         news_bot = self._make_bot()
         update = self._update(callback_data="bus_fav_remove:46009")
 
-        await news_bot.handle_bus_fav_remove(update, FakeContext())
+        await news_bot._bus.handle_bus_fav_remove(update, FakeContext())
 
         self.assertIn("fact:", update.message.replies[0])
         self.assertEqual(update.callback_query.edits, [])

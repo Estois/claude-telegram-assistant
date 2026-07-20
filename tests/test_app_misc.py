@@ -78,9 +78,9 @@ class AppMiscTests(AsyncBotTestCase):
             def find_by_code(self, code):
                 return {"Description": "Opp Blk 1"} if code == "46009" else None
 
-        news_bot._bus_stops = Stops()
+        object.__setattr__(news_bot.services, "stops", Stops())
 
-        self.assertEqual(news_bot._describe_stop("46009"), "Opp Blk 1 (46009)")
+        self.assertEqual(news_bot._bus._describe_stop("46009"), "Opp Blk 1 (46009)")
 
     async def test_location_with_no_nearby_stops_reports_none(self):
         news_bot = self._make_bot()
@@ -91,7 +91,7 @@ class AppMiscTests(AsyncBotTestCase):
             def nearest(self, lat, lon, count):
                 return []
 
-        news_bot._bus_stops = Stops()
+        object.__setattr__(news_bot.services, "stops", Stops())
 
         class _Loc:
             latitude = 1.3
@@ -99,7 +99,7 @@ class AppMiscTests(AsyncBotTestCase):
 
         update = self._update(location=_Loc())
 
-        await news_bot.handle_location(update, FakeContext())
+        await news_bot._bus.handle_location(update, FakeContext())
 
         self.assertIn("No bus stops found nearby", update.message.replies[0])
 
