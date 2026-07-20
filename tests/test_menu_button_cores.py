@@ -79,6 +79,20 @@ class InterestCoreButtonTests(AsyncBotTestCase):
 
         self.assertIsNone(update.message.replies_markup[-1])
 
+    async def test_update_interest_has_button_from_menu(self):
+        b = self._make_bot()
+        b._interests_for("alice").add("original")
+
+        async def fake_run_claude(update, context, prompt, **kwargs):
+            return "revised text"
+
+        b._run_claude = fake_run_claude
+        update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID)
+
+        await b._do_update_interest(update, FakeContext(), "alice", 1, "new text", from_menu=True)
+
+        self.assertEqual(home_data(update.message.replies_markup[-1]), "home")
+
 
 class CompileCoreButtonTests(AsyncBotTestCase):
     CHAT_ID = 52
