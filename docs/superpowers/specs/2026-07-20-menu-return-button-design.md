@@ -41,8 +41,13 @@ Callers set it:
 | Caller | Passes |
 |---|---|
 | Slash handlers (`handle_news`, `handle_get_interests`, …) | default `False` |
-| `handle_menu_action`, `handle_admin_action`, `handle_interest_select`, `handle_confirm` | `True` |
-| `_consume_awaiting` (every branch) | `True` |
+| `handle_menu_action` (`getinterests`, `compile`) | `True` |
+| `handle_confirm` (`int_rm:`, `adm_rm:`) | `True` |
+| `_consume_awaiting` (every branch except `bus_code`) | `True` |
+
+`handle_interest_select` and `handle_admin_action` are not in the table: neither
+calls a `_do_*` core. They render a confirm screen or arm a capture slot, and the
+result arrives later through `handle_confirm` or `_consume_awaiting`.
 
 Defaulting to `False` means no slash handler changes.
 
