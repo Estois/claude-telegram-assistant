@@ -8,6 +8,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional, Union
 
@@ -36,9 +37,38 @@ from ykbot.news_history import NewsHistoryStore
 from ykbot import menus
 from ykbot.trivia import FALLBACK_TRIVIA, TriviaBook
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_FILENAME = "bot.log"
+LOG_MAX_BYTES = 5 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
+
+
+def configure_logging(log_dir: Path) -> None:
+    """Sets up logging for the running bot. Called from main(), never at
+    import time: configuring the root logger as an import side effect would
+    hijack logging for anything that imports ykbot — including the test
+    suite, which imports it 443 times over.
+
+    Two things worth not undoing:
+
+    - httpx logs every request URL at INFO, and the Telegram API URL carries
+      the bot token in its path, so INFO-level httpx logging writes the live
+      credential to the log on every poll. WARNING keeps genuine transport
+      failures without the secret.
+    - The file handler rotates. Logs were previously appended by the shell
+      (``>> bot.log``), which cannot rotate and had grown past 18k lines.
+    """
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+    handler = RotatingFileHandler(
+        log_dir / LOG_FILENAME, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT
+    )
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    # force=True because basicConfig is a silent no-op once the root logger
+    # has any handler, which would leave the bot logging wherever a stray
+    # earlier call happened to point it. An entry point should own this.
+    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 
 
 class YKBot:
@@ -271,7 +301,27 @@ class YKBot:
         app.add_handler(MessageHandler(filters.LOCATION, self.handle_location))
         app.add_handler(MessageHandler(filters.COMMAND, self.handle_unknown_command))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_plain_text))
+        app.add_error_handler(self.handle_error)
         return app
+
+    async def handle_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Last-resort net for exceptions no handler caught. Without this
+        registered, python-telegram-bot logs 'No error handlers are
+        registered' and the user's button or command simply does nothing —
+        a silent failure is worse than an error message.
+
+        The notice is deliberately generic: it says nothing about which
+        command failed, so it can't be used to probe which commands exist.
+        Delivery is best-effort — if replying also fails (the chat is gone,
+        Telegram is down), log it and give up rather than recursing."""
+        logger.exception("Unhandled exception while processing update", exc_info=context.error)
+        message = getattr(update, "effective_message", None)
+        if message is None:
+            return
+        try:
+            await message.reply_text("Something went wrong on my end. Try again in a moment.")
+        except Exception:
+            logger.exception("Failed to deliver the error notice")
 
     def _warn_about_missing_config(self) -> None:
         if self._allowlist.ids is None:
@@ -1601,5 +1651,7 @@ class YKBot:
 
 
 def main() -> None:
-    YKBot(Config.from_env()).run()
+    config = Config.from_env()
+    configure_logging(config.base_dir)
+    YKBot(config).run()
 

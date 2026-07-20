@@ -7,7 +7,14 @@ re-exported here so ``from ykbot import X`` and ``import bot`` both work.
 
 from ykbot._logging import logger
 from ykbot.accounts import AccountStore, AllowlistStore
-from ykbot.app import YKBot, main
+from ykbot.app import (
+    LOG_BACKUP_COUNT,
+    LOG_FILENAME,
+    LOG_MAX_BYTES,
+    YKBot,
+    configure_logging,
+    main,
+)
 from ykbot.bus import BusLocationsStore, BusStopsCache, LtaBusClient
 from ykbot.claude import ClaudeClient
 from ykbot.config import Config
@@ -35,5 +42,9 @@ __all__ = [
     "CommandSpec",
     "YKBot",
     "main",
+    "configure_logging",
+    "LOG_FILENAME",
+    "LOG_MAX_BYTES",
+    "LOG_BACKUP_COUNT",
     "logger",
 ]

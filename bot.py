@@ -6,6 +6,9 @@ for the test suite (``import bot``); every public name is re-exported below.
 """
 
 from ykbot import (
+    LOG_BACKUP_COUNT,
+    LOG_FILENAME,
+    LOG_MAX_BYTES,
     AccountStore,
     AllowlistStore,
     AnimalEmoji,
@@ -22,12 +25,17 @@ from ykbot import (
     TelegramFormatter,
     TriviaBook,
     YKBot,
+    configure_logging,
     logger,
     main,
 )
 
 __all__ = [
     "Config",
+    "configure_logging",
+    "LOG_FILENAME",
+    "LOG_MAX_BYTES",
+    "LOG_BACKUP_COUNT",
     "AccountStore",
     "AllowlistStore",
     "ClaudeClient",
