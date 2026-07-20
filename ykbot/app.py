@@ -980,7 +980,9 @@ class YKBot:
         await query.answer()
         action = query.data.split(":", 1)[1]
         if action == "getusers":
-            await query.edit_message_text(self._format_user_listing())
+            await query.edit_message_text(
+                self._format_user_listing(), reply_markup=menus.admin_keyboard()
+            )
         elif action == "adduserteleid":
             context.user_data["awaiting"] = {"kind": "add_user_tele_id", "payload": {}}
             await query.edit_message_text("Send the Telegram user id to allow:")
@@ -1035,6 +1037,7 @@ class YKBot:
         buttons.append(
             [InlineKeyboardButton("➕ Add a stop by code", callback_data="bus_addbycode")]
         )
+        buttons.append([InlineKeyboardButton("🏠 Menu", callback_data="home")])
         return "Pick a stop:", InlineKeyboardMarkup(buttons)
 
     def _build_near_menu(self, stops: list) -> "tuple[str, InlineKeyboardMarkup]":
@@ -1047,6 +1050,7 @@ class YKBot:
             ]
             for stop in stops
         ]
+        buttons.append([InlineKeyboardButton("🏠 Menu", callback_data="home")])
         return "Nearest stops:", InlineKeyboardMarkup(buttons)
 
     async def handle_bus_request_location(

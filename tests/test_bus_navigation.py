@@ -70,7 +70,7 @@ class MenuBuilderTests(BotTestCase):
 
         self.assertEqual(text, "Nearest stops:")
         self.assertEqual(
-            callback_datas(markup), ["bus_stop:46009", "bus_stop:46008"]
+            callback_datas(markup), ["bus_stop:46009", "bus_stop:46008", "home"]
         )
         self.assertIn("Opp Blk 1 (42m)", button_texts(markup))
 
