@@ -94,7 +94,16 @@ class FakeUpdate:
     callback-query handlers, where .message is None on a real Update).
 
     Pass callback_data to also attach a FakeCallbackQuery, for testing the
-    inline-button (callback-query) handlers."""
+    inline-button (callback-query) handlers.
+
+    Pass callback_only=True to model a REAL callback-query update, where
+    .message is None and only .effective_message (via .callback_query.message)
+    is available. Handlers that reply via update.message.reply_text instead of
+    update.effective_message.reply_text raise AttributeError on a real button
+    tap; the default (callback_only=False) can't catch that because .message
+    and .effective_message are the same non-None object. callback_only=True
+    requires callback_data — a callback-only update without callback data
+    would be a silently useless double."""
 
     def __init__(
         self,
@@ -106,16 +115,30 @@ class FakeUpdate:
         location=None,
         full_name: str = None,
         username: str = None,
+        callback_only: bool = False,
     ):
+        if callback_only and callback_data is None:
+            raise ValueError(
+                "callback_only=True requires callback_data — a callback-only "
+                "update models a real Telegram callback query, which always "
+                "carries data."
+            )
         self.effective_user = FakeUser(user_id, full_name=full_name, username=username)
         self.effective_chat = FakeChat(chat_id)
-        self.message = FakeMessage(text=text, message_id=message_id, location=location)
-        self.effective_message = self.message
-        self.callback_query = (
-            FakeCallbackQuery(callback_data, self.message)
-            if callback_data is not None
-            else None
-        )
+        if callback_only:
+            self.message = None
+            self.effective_message = FakeMessage(
+                text=text, message_id=message_id, location=location
+            )
+            self.callback_query = FakeCallbackQuery(callback_data, self.effective_message)
+        else:
+            self.message = FakeMessage(text=text, message_id=message_id, location=location)
+            self.effective_message = self.message
+            self.callback_query = (
+                FakeCallbackQuery(callback_data, self.message)
+                if callback_data is not None
+                else None
+            )
 
 
 class FakeBot:
