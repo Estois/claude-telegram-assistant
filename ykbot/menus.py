@@ -68,6 +68,10 @@ def confirm_keyboard(token: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def back_keyboard(target: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=target)]])
+
+
 def home_keyboard() -> InlineKeyboardMarkup:
     """A lone 🏠 Menu button for results produced from the button menu, so
     they aren't dead ends. Its callback_data is deliberately NOT menu:root:

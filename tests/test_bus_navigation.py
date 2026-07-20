@@ -1,3 +1,7 @@
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
+
 import bot
 from tests.helpers import (
     AsyncBotTestCase,
@@ -118,6 +122,34 @@ class RefreshTests(_BusBotMixin, AsyncBotTestCase):
         self.assertIn("🔄 Updated ", text)
         self.assertIn("bus_back", callback_datas(update.callback_query.last_markup))
 
+    async def test_refresh_stamp_uses_singapore_time_not_naive_local(self):
+        """The Telegram Bot API has no way to learn a user's device
+        timezone, and this bot's only data (LTA bus arrivals) is
+        Singapore-only, so the 'Updated HH:MM:SS' footer must be computed
+        in Asia/Singapore rather than whatever timezone the server/container
+        happens to be running in."""
+        news_bot = self._make_bot()
+        update = self._update(callback_data="bus_refresh:46009")
+
+        # A UTC instant that lands on a different calendar day/hour than its
+        # Singapore (+8) equivalent, so a naive-vs-aware mixup would be
+        # visible in the rendered stamp.
+        fixed_utc = datetime(2026, 1, 1, 23, 30, 0, tzinfo=timezone.utc)
+        fixed_sgt = fixed_utc.astimezone(ZoneInfo("Asia/Singapore"))
+
+        with patch("ykbot.handlers.bus.datetime") as mock_datetime:
+            mock_datetime.now.side_effect = lambda tz=None: fixed_sgt
+            await news_bot._bus.handle_bus_refresh(update, FakeContext())
+
+        # datetime.now() must be called WITH a tzinfo argument that resolves
+        # to the Singapore UTC+8 offset — not bare/naive.
+        called_tz = mock_datetime.now.call_args.args[0]
+        self.assertIsNotNone(called_tz)
+        self.assertEqual(called_tz.utcoffset(datetime(2026, 1, 1)), timedelta(hours=8))
+
+        text = update.callback_query.last_text
+        self.assertIn(f"🔄 Updated {fixed_sgt.strftime('%H:%M:%S')}", text)
+
 
 class BackTests(_BusBotMixin, AsyncBotTestCase):
     async def test_back_to_fav_menu_edits_message_to_preferred_stops(self):
@@ -179,6 +211,12 @@ class AddBusStopByCodeTests(_BusBotMixin, AsyncBotTestCase):
 
         self.assertEqual(ctx.user_data["awaiting"], {"kind": "bus_code", "payload": {}})
         self.assertIn("code", update.callback_query.last_text.lower())
+        markup = update.callback_query.last_markup
+        self.assertEqual(len(markup.inline_keyboard), 1)
+        self.assertEqual(len(markup.inline_keyboard[0]), 1)
+        back_btn = markup.inline_keyboard[0][0]
+        self.assertEqual(back_btn.text, "⬅️ Back")
+        self.assertEqual(back_btn.callback_data, "act:bus")
 
     async def test_awaiting_code_message_shows_confirmation(self):
         news_bot = self._make_bot()

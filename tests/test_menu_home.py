@@ -76,6 +76,18 @@ class HandleMenuHomeTests(AsyncBotTestCase):
 
         self.assertNotIn("menu:admin", datas(update.message.replies_markup[-1]))
 
+    async def test_clears_pending_awaiting_capture(self):
+        """Tapping 🏠 Home while a 'please type X' capture is armed must
+        cancel it — otherwise the next unrelated message could be silently
+        swallowed as the answer to a prompt the user navigated away from."""
+        b = self._make_bot()
+        update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID, callback_data="home")
+        ctx = FakeContext(user_data={"awaiting": {"kind": "news_subject", "payload": {}}})
+
+        await b.handle_menu_home(update, ctx)
+
+        self.assertNotIn("awaiting", ctx.user_data)
+
 
 class HomeHandlerRegistrationTests(BotTestCase):
     def test_home_pattern_is_registered(self):

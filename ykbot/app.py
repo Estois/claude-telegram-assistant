@@ -561,6 +561,10 @@ class YKBot:
             await query.answer()
             return
         await query.answer()
+        # Any navigation away from a "please type X" prompt cancels the
+        # pending capture — otherwise a stale awaiting slot could silently
+        # swallow the user's next, unrelated message.
+        context.user_data.pop("awaiting", None)
         target = query.data.split(":", 1)[1]
         if target == "interests":
             await query.edit_message_text("Interests:", reply_markup=menus.interests_keyboard())
@@ -584,6 +588,7 @@ class YKBot:
             await query.answer()
             return
         await query.answer()
+        context.user_data.pop("awaiting", None)
         await update.effective_message.reply_text(
             "What would you like to do?", reply_markup=self._menu_markup(update, account_id)
         )
@@ -595,6 +600,7 @@ class YKBot:
             await query.answer()
             return
         await query.answer()
+        context.user_data.pop("awaiting", None)
         await self._bus.open_bus_menu(update, context, account_id)
 
     async def handle_menu_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -615,14 +621,20 @@ class YKBot:
             )
         elif action == "news":
             context.user_data["awaiting"] = {"kind": "news_subject", "payload": {}}
-            await query.edit_message_text("Send the subject for your news digest:")
+            await query.edit_message_text(
+                "Send the subject for your news digest:",
+                reply_markup=menus.back_keyboard("menu:root"),
+            )
         elif action == "summarize":
             context.user_data["awaiting"] = {"kind": "summarize_url", "payload": {}}
-            await query.edit_message_text("Send the URL to summarize:")
+            await query.edit_message_text(
+                "Send the URL to summarize:", reply_markup=menus.back_keyboard("menu:root")
+            )
         elif action == "addinterest":
             context.user_data["awaiting"] = {"kind": "add_interest", "payload": {}}
             await query.edit_message_text(
-                "Send the interest to add (a word, sentence, or paragraph):"
+                "Send the interest to add (a word, sentence, or paragraph):",
+                reply_markup=menus.back_keyboard("menu:interests"),
             )
 
     async def handle_interest_pick(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -665,7 +677,8 @@ class YKBot:
             context.user_data["awaiting"] = {"kind": "update_interest", "payload": {"index": index}}
             await query.edit_message_text(
                 f"Send the new text for interest #{index} "
-                "(I'll decide whether to revise or replace it):"
+                "(I'll decide whether to revise or replace it):",
+                reply_markup=menus.back_keyboard("menu:interests"),
             )
 
     async def handle_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1079,7 +1092,10 @@ class YKBot:
             )
         elif action == "adduserteleid":
             context.user_data["awaiting"] = {"kind": "add_user_tele_id", "payload": {}}
-            await query.edit_message_text("Send the Telegram user id to allow:")
+            await query.edit_message_text(
+                "Send the Telegram user id to allow:",
+                reply_markup=menus.back_keyboard("menu:admin"),
+            )
 
     async def handle_admin_pick_remove(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query

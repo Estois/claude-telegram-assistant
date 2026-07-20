@@ -6,6 +6,7 @@ BotServices, so this module never imports or references YKBot.
 
 import asyncio
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -13,6 +14,8 @@ from telegram.ext import ContextTypes
 from ykbot import menus
 from ykbot._logging import logger
 from ykbot.services import BotServices
+
+_SGT = ZoneInfo("Asia/Singapore")
 
 
 class BusHandlers:
@@ -97,7 +100,7 @@ class BusHandlers:
         footer both confirms a refresh happened and keeps the message text
         changing, so Telegram never rejects the edit as 'not modified'."""
         text = await self._format_arrivals(stop_code)
-        stamp = datetime.now().strftime("%H:%M:%S")
+        stamp = datetime.now(_SGT).strftime("%H:%M:%S")
         return f"{prefix}{text}\n\n🔄 Updated {stamp}"
 
     async def handle_bus_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -184,7 +187,8 @@ class BusHandlers:
         context.user_data["awaiting"] = {"kind": "bus_code", "payload": {}}
         await query.edit_message_text(
             "Send me the bus stop's code — the 5-digit number on the sign — and "
-            "I'll show you the stop before adding it to your preferred list."
+            "I'll show you the stop before adding it to your preferred list.",
+            reply_markup=menus.back_keyboard("act:bus"),
         )
 
     async def prompt_add_bus_stop(

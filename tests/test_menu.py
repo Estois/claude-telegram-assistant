@@ -115,6 +115,77 @@ class MenuTests(AsyncBotTestCase):
         self.assertTrue(update.message.replies)
         self.assertEqual(context.user_data["bus_menu"], {"kind": "fav"})
 
+    async def test_nav_to_root_clears_pending_awaiting_capture(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        ctx = FakeContext(user_data={"awaiting": {"kind": "news_subject", "payload": {}}})
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="menu:root")
+
+        await b.handle_menu_nav(update, ctx)
+
+        self.assertNotIn("awaiting", ctx.user_data)
+
+    async def test_nav_to_interests_clears_pending_awaiting_capture(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        ctx = FakeContext(user_data={"awaiting": {"kind": "add_interest", "payload": {}}})
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="menu:interests")
+
+        await b.handle_menu_nav(update, ctx)
+
+        self.assertNotIn("awaiting", ctx.user_data)
+
+    async def test_nav_to_admin_clears_pending_awaiting_capture(self):
+        b = self._make_bot()
+        self._unlock(b, 1, "adm")  # amy on chat 1 (admin)
+        ctx = FakeContext(user_data={"awaiting": {"kind": "add_user_tele_id", "payload": {}}})
+        update = FakeUpdate(user_id=self.ADMIN_USER, chat_id=1, callback_data="menu:admin")
+
+        await b.handle_menu_nav(update, ctx)
+
+        self.assertNotIn("awaiting", ctx.user_data)
+
+    async def test_menu_bus_clears_pending_awaiting_capture(self):
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+        ctx = FakeContext(user_data={"awaiting": {"kind": "bus_code", "payload": {}}})
+        update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:bus")
+
+        await b.handle_menu_bus(update, ctx)
+
+        self.assertNotIn("awaiting", ctx.user_data)
+
+    async def test_back_button_cancels_capture_then_next_message_is_password_attempt(self):
+        """Regression test for the stale-awaiting bug: tapping a prompt's
+        Back button must cancel the pending capture, so the user's next
+        (unrelated) plain-text message falls through to the normal
+        password/trivia path instead of being silently swallowed as the
+        answer to a prompt they already backed out of."""
+        b = self._make_bot()
+        self._unlock(b, self.CHAT_ID, "pw")
+
+        async def fake_do_news(update, context, account_id, subject, from_menu=False):
+            update.effective_message.replies.append(f"digest:{subject}")
+        b._do_news = fake_do_news
+
+        arm = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:news")
+        ctx = FakeContext()
+        await b.handle_menu_action(arm, ctx)
+        self.assertEqual(ctx.user_data["awaiting"]["kind"], "news_subject")
+        self.assertEqual(datas(arm.callback_query.last_markup), ["menu:root"])
+
+        back = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="menu:root")
+        await b.handle_menu_nav(back, ctx)
+        self.assertNotIn("awaiting", ctx.user_data)
+
+        typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="unrelated password guess")
+        await b.handle_plain_text(typed, ctx)
+
+        # Treated as a (failed) password attempt, not silently consumed as
+        # the news subject: a trivia reply, and no digest was generated.
+        self.assertIn("fact:", typed.message.replies[0])
+        self.assertFalse(any("digest:" in (r or "") for r in typed.message.replies))
+
     async def test_locked_user_nav_is_rejected(self):
         b = self._make_bot()
         update = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="menu:interests")
@@ -222,6 +293,12 @@ class MenuTests(AsyncBotTestCase):
         await b.handle_menu_action(arm, ctx)
         self.assertEqual(ctx.user_data["awaiting"]["kind"], "news_subject")
         self.assertIn("Send the subject for your news digest:", arm.callback_query.last_text)
+        markup = arm.callback_query.last_markup
+        self.assertEqual(len(markup.inline_keyboard), 1)
+        self.assertEqual(len(markup.inline_keyboard[0]), 1)
+        back_btn = markup.inline_keyboard[0][0]
+        self.assertEqual(back_btn.text, "⬅️ Back")
+        self.assertEqual(back_btn.callback_data, "menu:root")
 
         typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="climate")
         await b.handle_plain_text(typed, ctx)
@@ -243,6 +320,12 @@ class MenuTests(AsyncBotTestCase):
         await b.handle_menu_action(arm, ctx)
         self.assertEqual(ctx.user_data["awaiting"]["kind"], "summarize_url")
         self.assertIn("Send the URL to summarize:", arm.callback_query.last_text)
+        markup = arm.callback_query.last_markup
+        self.assertEqual(len(markup.inline_keyboard), 1)
+        self.assertEqual(len(markup.inline_keyboard[0]), 1)
+        back_btn = markup.inline_keyboard[0][0]
+        self.assertEqual(back_btn.text, "⬅️ Back")
+        self.assertEqual(back_btn.callback_data, "menu:root")
 
         typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="https://example.com/a")
         await b.handle_plain_text(typed, ctx)
@@ -269,6 +352,12 @@ class MenuTests(AsyncBotTestCase):
         self.assertIn(
             "Send the interest to add (a word, sentence, or paragraph):", arm.callback_query.last_text
         )
+        markup = arm.callback_query.last_markup
+        self.assertEqual(len(markup.inline_keyboard), 1)
+        self.assertEqual(len(markup.inline_keyboard[0]), 1)
+        back_btn = markup.inline_keyboard[0][0]
+        self.assertEqual(back_btn.text, "⬅️ Back")
+        self.assertEqual(back_btn.callback_data, "menu:interests")
 
         typed = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, text="weather")
         await b.handle_plain_text(typed, ctx)
@@ -344,6 +433,12 @@ class MenuTests(AsyncBotTestCase):
 
         self.assertEqual(ctx.user_data["awaiting"], {"kind": "update_interest", "payload": {"index": 1}})
         self.assertIn("Send the new text for interest #1", sel.callback_query.last_text)
+        markup = sel.callback_query.last_markup
+        self.assertEqual(len(markup.inline_keyboard), 1)
+        self.assertEqual(len(markup.inline_keyboard[0]), 1)
+        back_btn = markup.inline_keyboard[0][0]
+        self.assertEqual(back_btn.text, "⬅️ Back")
+        self.assertEqual(back_btn.callback_data, "menu:interests")
 
     async def test_locked_user_interest_select_is_rejected(self):
         b = self._make_bot()
@@ -452,6 +547,12 @@ class MenuTests(AsyncBotTestCase):
 
         self.assertEqual(ctx.user_data["awaiting"], {"kind": "add_user_tele_id", "payload": {}})
         self.assertIn("Send the Telegram user id to allow:", update.callback_query.last_text)
+        markup = update.callback_query.last_markup
+        self.assertEqual(len(markup.inline_keyboard), 1)
+        self.assertEqual(len(markup.inline_keyboard[0]), 1)
+        back_btn = markup.inline_keyboard[0][0]
+        self.assertEqual(back_btn.text, "⬅️ Back")
+        self.assertEqual(back_btn.callback_data, "menu:admin")
 
     async def test_adduserteleid_capture_stale_slot_ignored_for_non_admin(self):
         b = self._make_bot()
