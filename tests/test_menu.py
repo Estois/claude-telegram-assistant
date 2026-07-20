@@ -210,8 +210,9 @@ class MenuTests(AsyncBotTestCase):
         b = self._make_bot()
         self._unlock(b, self.CHAT_ID, "pw")
 
-        async def fake_do_news(update, context, account_id, subject):
+        async def fake_do_news(update, context, account_id, subject, from_menu=False):
             update.effective_message.replies.append(f"digest:{subject}")
+            self.assertTrue(from_menu, "capture-completed news must be flagged as menu-initiated")
         b._do_news = fake_do_news
 
         arm = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:news")
@@ -228,8 +229,11 @@ class MenuTests(AsyncBotTestCase):
         b = self._make_bot()
         self._unlock(b, self.CHAT_ID, "pw")
 
-        async def fake_do_summarize(update, context, url):
+        async def fake_do_summarize(update, context, url, from_menu=False):
             update.effective_message.replies.append(f"summary:{url}")
+            self.assertTrue(
+                from_menu, "capture-completed summarize must be flagged as menu-initiated"
+            )
         b._do_summarize = fake_do_summarize
 
         arm = FakeUpdate(user_id=self.USER, chat_id=self.CHAT_ID, callback_data="act:summarize")

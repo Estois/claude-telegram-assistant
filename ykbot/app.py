@@ -637,7 +637,12 @@ class YKBot:
         await self._do_news(update, context, account_id, " ".join(context.args))
 
     async def _do_news(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE, account_id: str, subject: str
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        account_id: str,
+        subject: str,
+        from_menu: bool = False,
     ) -> None:
         if self._config.news_learning_enabled:
             try:
@@ -649,7 +654,7 @@ class YKBot:
             update, context, self._build_news_prompt(subject, account_id), web_tools=True
         )
         if reply is not None:
-            await self._send_formatted(update, self._strip_news_preamble(reply))
+            await self._send_formatted(update, self._strip_news_preamble(reply), from_menu)
 
     async def handle_summarize(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -672,13 +677,17 @@ class YKBot:
         await self._do_summarize(update, context, url)
 
     async def _do_summarize(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        url: str,
+        from_menu: bool = False,
     ) -> None:
         reply = await self._run_claude(
             update, context, self._build_summarize_prompt(url), web_tools=True
         )
         if reply is not None:
-            await self._send_formatted(update, reply)
+            await self._send_formatted(update, reply, from_menu)
 
     @staticmethod
     def _is_fetchable_url(url: str) -> bool:
@@ -1298,28 +1307,30 @@ class YKBot:
         if kind == "bus_code":
             await self._prompt_add_bus_stop(update, context, account_id, text)
         elif kind == "news_subject":
-            await self._do_news(update, context, account_id, text.strip())
+            await self._do_news(update, context, account_id, text.strip(), from_menu=True)
         elif kind == "summarize_url":
             url = text.strip()
             if not self._is_fetchable_url(url):
-                await update.effective_message.reply_text(
-                    "Please give a single public http(s) URL to summarize."
+                await self._reply_result(
+                    update, "Please give a single public http(s) URL to summarize.", True
                 )
             else:
-                await self._do_summarize(update, context, url)
+                await self._do_summarize(update, context, url, from_menu=True)
         elif kind == "add_interest":
-            await self._do_add_interest(update, account_id, text.strip())
+            await self._do_add_interest(update, account_id, text.strip(), from_menu=True)
         elif kind == "add_user_tele_id":
             if self._is_admin(update, account_id):
-                await self._do_add_user_tele_id(update, text)
+                await self._do_add_user_tele_id(update, text, from_menu=True)
         elif kind == "update_interest":
             index = awaiting["payload"]["index"]
             entries = self._interests_for(account_id).list()
             if 1 <= index <= len(entries):
-                await self._do_update_interest(update, context, account_id, index, text.strip())
+                await self._do_update_interest(
+                    update, context, account_id, index, text.strip(), from_menu=True
+                )
             else:
-                await update.effective_message.reply_text(
-                    f"Interest #{index} no longer exists. See /getinterests."
+                await self._reply_result(
+                    update, f"Interest #{index} no longer exists. See /getinterests.", True
                 )
         return True
 
