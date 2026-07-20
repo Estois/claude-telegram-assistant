@@ -530,9 +530,9 @@ class YKBot:
         await query.answer()
         action = query.data.split(":", 1)[1]
         if action == "getinterests":
-            await self._do_show_interests(update, account_id)
+            await self._do_show_interests(update, account_id, from_menu=True)
         elif action == "compile":
-            await self._do_compile_interests(update, context, account_id)
+            await self._do_compile_interests(update, context, account_id, from_menu=True)
         elif action == "endsession":
             await query.edit_message_text(
                 "End your session now?", reply_markup=menus.confirm_keyboard("endsession")
@@ -605,11 +605,11 @@ class YKBot:
             await query.edit_message_text("Session ended.")
         elif token.startswith("int_rm:"):
             index = int(token.split(":", 1)[1])
-            await self._do_remove_interest(update, account_id, index)
+            await self._do_remove_interest(update, account_id, index, from_menu=True)
         elif token.startswith("adm_rm:"):
             if await self._require_admin(update) is None:
                 return
-            await self._do_remove_user(update, token.split(":", 1)[1])
+            await self._do_remove_user(update, token.split(":", 1)[1], from_menu=True)
 
     async def handle_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -716,9 +716,11 @@ class YKBot:
             return
         await self._do_add_interest(update, account_id, " ".join(context.args))
 
-    async def _do_add_interest(self, update: Update, account_id: str, text: str) -> None:
+    async def _do_add_interest(
+        self, update: Update, account_id: str, text: str, from_menu: bool = False
+    ) -> None:
         index = self._interests_for(account_id).add(text)
-        await update.effective_message.reply_text(f"Added as interest #{index}.")
+        await self._reply_result(update, f"Added as interest #{index}.", from_menu)
 
     async def handle_get_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -726,14 +728,16 @@ class YKBot:
             return
         await self._do_show_interests(update, account_id)
 
-    async def _do_show_interests(self, update: Update, account_id: str) -> None:
+    async def _do_show_interests(
+        self, update: Update, account_id: str, from_menu: bool = False
+    ) -> None:
         entries = self._interests_for(account_id).list()
         if not entries:
-            await update.effective_message.reply_text(
-                "No interests saved yet. Add one with /addinterests <topic>."
+            await self._reply_result(
+                update, "No interests saved yet. Add one with /addinterests <topic>.", from_menu
             )
             return
-        await update.effective_message.reply_text(self._format_interests_listing(entries))
+        await self._reply_result(update, self._format_interests_listing(entries), from_menu)
 
     async def handle_update_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -773,6 +777,7 @@ class YKBot:
         account_id: str,
         index: int,
         text: str,
+        from_menu: bool = False,
     ) -> None:
         interests = self._interests_for(account_id)
         entries = interests.list()
@@ -782,7 +787,7 @@ class YKBot:
             return
 
         interests.update(index, new_text)
-        await update.effective_message.reply_text(f"Updated interest #{index}.")
+        await self._reply_result(update, f"Updated interest #{index}.", from_menu)
 
     async def handle_remove_interest(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -803,15 +808,19 @@ class YKBot:
 
         await self._do_remove_interest(update, account_id, int(context.args[0]))
 
-    async def _do_remove_interest(self, update: Update, account_id: str, index: int) -> None:
+    async def _do_remove_interest(
+        self, update: Update, account_id: str, index: int, from_menu: bool = False
+    ) -> None:
         interests = self._interests_for(account_id)
         removed = interests.remove(index)
         if removed is None:
-            await update.effective_message.reply_text(
-                f"No interest #{index}. Valid range: 1-{len(interests.list())}. See /getinterests."
+            await self._reply_result(
+                update,
+                f"No interest #{index}. Valid range: 1-{len(interests.list())}. See /getinterests.",
+                from_menu,
             )
             return
-        await update.effective_message.reply_text(f'Removed interest #{index}: "{removed}"')
+        await self._reply_result(update, f'Removed interest #{index}: "{removed}"', from_menu)
 
     async def handle_compile_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Manual trigger for the same reorganization the background job
@@ -823,14 +832,18 @@ class YKBot:
         await self._do_compile_interests(update, context, account_id)
 
     async def _do_compile_interests(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE, account_id: str
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        account_id: str,
+        from_menu: bool = False,
     ) -> None:
         interests = self._interests_for(account_id)
         entries = interests.list()
         theme_counts = self._recent_theme_counts(account_id)
         if len(entries) < 2 and not theme_counts:
-            await update.effective_message.reply_text(
-                "Need at least 2 interests to reorganize. See /getinterests."
+            await self._reply_result(
+                update, "Need at least 2 interests to reorganize. See /getinterests.", from_menu
             )
             return
 
@@ -843,15 +856,15 @@ class YKBot:
 
         new_entries = InterestsStore.parse_entries(raw_reply)
         if not new_entries:
-            await update.effective_message.reply_text(
-                "Reorganize returned nothing usable — no changes made."
+            await self._reply_result(
+                update, "Reorganize returned nothing usable — no changes made.", from_menu
             )
             return
 
         interests.replace_all(new_entries)
         summary = f"🗂 Reorganized interests: {len(entries)} → {len(new_entries)} entries."
-        await update.effective_message.reply_text(
-            f"{summary}\n\n{self._format_interests_listing(new_entries)}"
+        await self._reply_result(
+            update, f"{summary}\n\n{self._format_interests_listing(new_entries)}", from_menu
         )
 
     @staticmethod
@@ -899,13 +912,15 @@ class YKBot:
 
         await self._do_remove_user(update, context.args[0])
 
-    async def _do_remove_user(self, update: Update, name: str) -> None:
+    async def _do_remove_user(self, update: Update, name: str, from_menu: bool = False) -> None:
         if name == self._config.admin_account_id:
-            await update.effective_message.reply_text("Refusing to remove the admin account.")
+            await self._reply_result(update, "Refusing to remove the admin account.", from_menu)
             return
         removed = self._accounts.remove_account(name)
-        await update.effective_message.reply_text(
-            f"Removed account '{name}'." if removed else f"No account named '{name}'."
+        await self._reply_result(
+            update,
+            f"Removed account '{name}'." if removed else f"No account named '{name}'.",
+            from_menu,
         )
 
     async def handle_add_user_tele_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -918,15 +933,19 @@ class YKBot:
 
         await self._do_add_user_tele_id(update, context.args[0])
 
-    async def _do_add_user_tele_id(self, update: Update, raw: str) -> None:
+    async def _do_add_user_tele_id(
+        self, update: Update, raw: str, from_menu: bool = False
+    ) -> None:
         raw = raw.strip()
         if not raw.isdigit():
-            await update.effective_message.reply_text("That isn't a numeric Telegram user id.")
+            await self._reply_result(update, "That isn't a numeric Telegram user id.", from_menu)
             return
         user_id = int(raw)
         added = self._allowlist.add(user_id)
-        await update.effective_message.reply_text(
-            f"Added {user_id} to the allowlist." if added else f"{user_id} is already allowed."
+        await self._reply_result(
+            update,
+            f"Added {user_id} to the allowlist." if added else f"{user_id} is already allowed.",
+            from_menu,
         )
 
     async def handle_get_users(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
