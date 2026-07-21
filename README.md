@@ -17,8 +17,8 @@ whichever account your password unlocked (see Accounts).
 
 | Command | Does |
 | --- | --- |
-| `/news <subject>` | Generates a news digest on `<subject>` from the past week only, biased toward your account's saved interests |
-| `/research <subject>` | Deeper, non-time-boxed research on `<subject>` — background, current state, multiple angles. The result has 🔍 More depth / 🌐 More breadth buttons to refine it further |
+| `/news <subject>` | Generates a news digest on `<subject>` from the past week only, biased toward your account's saved interests. Replies with a "pulling this together" notice first, since it can take a few minutes |
+| `/research <subject>` | Deeper, non-time-boxed research on `<subject>` — background, current state, multiple angles. The result has 🔍 More depth / 🌐 More breadth buttons to refine it further. Also replies with a "researching" notice first — this one commonly takes longer than `/news` |
 | `/summarize <url>` | Fetches a public web page and summarizes it (internal/private URLs are refused) |
 | `/addinterests <topic>` | Adds an interest — a word, sentence, or paragraph |
 | `/getinterests` | Lists your account's interests with their index |

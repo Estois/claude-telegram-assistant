@@ -146,6 +146,53 @@ class RunClaudeTests(HandlerTestBase):
         self.assertIsNone(result)
         self.assertIn("Still working", update.message.replies[0])
 
+    async def test_busy_lock_does_not_also_send_the_processing_notice(self):
+        news_bot = self._make_bot()
+        update = self._update()
+        await news_bot._claude.lock_for(self.CHAT_ID).acquire()
+
+        await news_bot._run_claude(
+            update, FakeContext(), "prompt", processing_notice="Working on it…"
+        )
+
+        self.assertEqual(update.message.replies, ["Still working on your last request — hang on."])
+
+    async def test_processing_notice_sent_before_the_claude_call(self):
+        news_bot = self._make_bot()
+
+        async def fake_run(prompt, web_tools=False):
+            return "the answer"
+
+        news_bot._claude.run = fake_run
+        update = self._update()
+
+        await news_bot._run_claude(
+            update, FakeContext(), "prompt", processing_notice="Working on it…"
+        )
+
+        self.assertEqual(update.message.replies, ["Working on it…"])
+
+    async def test_no_processing_notice_by_default(self):
+        news_bot = self._make_bot()
+
+        async def fake_run(prompt, web_tools=False):
+            return "the answer"
+
+        news_bot._claude.run = fake_run
+        update = self._update()
+
+        await news_bot._run_claude(update, FakeContext(), "prompt")
+
+        self.assertEqual(update.message.replies, [])
+
+    async def test_max_wait_minutes_derives_from_config(self):
+        news_bot = self._make_bot(claude_timeout_seconds=125)
+        self.assertEqual(news_bot._max_wait_minutes(), 2)
+
+    async def test_max_wait_minutes_floors_at_one(self):
+        news_bot = self._make_bot(claude_timeout_seconds=30)
+        self.assertEqual(news_bot._max_wait_minutes(), 1)
+
     async def test_success_returns_claude_reply(self):
         news_bot = self._make_bot()
 

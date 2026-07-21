@@ -826,7 +826,11 @@ class YKBot:
                 logger.exception("Failed to log /news subject for %s", account_id)
         interests = await asyncio.to_thread(self._interests_for(account_id).list)
         reply = await self._run_claude(
-            update, context, self._build_news_prompt(subject, interests), web_tools=True
+            update, context, self._build_news_prompt(subject, interests), web_tools=True,
+            processing_notice=(
+                f'📰 Pulling together your news digest on "{subject}"… this can take up '
+                f"to {self._max_wait_minutes()} minutes."
+            ),
         )
         if reply is not None:
             await self._send_formatted(update, self._strip_news_preamble(reply), from_menu)
@@ -863,6 +867,10 @@ class YKBot:
             update, context,
             self._build_research_prompt(subject, interests, mode="initial"),
             web_tools=True,
+            processing_notice=(
+                f'🔬 Researching "{subject}"… this can take up to '
+                f"{self._max_wait_minutes()} minutes."
+            ),
         )
         if reply is None:
             return
@@ -905,7 +913,14 @@ class YKBot:
         prompt = self._build_research_prompt(
             state["subject"], interests, mode=mode, previous_findings=state["findings"],
         )
-        reply = await self._run_claude(update, context, prompt, web_tools=True)
+        direction = "deeper" if mode == "depth" else "broader"
+        reply = await self._run_claude(
+            update, context, prompt, web_tools=True,
+            processing_notice=(
+                f'🔬 Going {direction} on "{state["subject"]}"… this can take up to '
+                f"{self._max_wait_minutes()} minutes."
+            ),
+        )
         if reply is None:
             return
         findings = self._strip_preamble(reply, "Research Findings")
@@ -1443,6 +1458,9 @@ class YKBot:
                 "⚠️ Something went wrong reaching Claude. Please try again in a bit."
             )
 
+    def _max_wait_minutes(self) -> int:
+        return max(1, self._config.claude_timeout_seconds // 60)
+
     async def _run_claude(
         self,
         update: Update,
@@ -1451,6 +1469,7 @@ class YKBot:
         *,
         chat_id: Optional[Union[int, str]] = None,
         web_tools: bool = False,
+        processing_notice: Optional[str] = None,
     ) -> Optional[str]:
         """Runs prompt through Claude and returns the raw reply. Each call is
         an independent one-shot invocation. Serializes per lock key (the
@@ -1462,7 +1481,14 @@ class YKBot:
         non-zero when it hits a limit — its authoritative signal). A
         successful reply is never second-guessed, so a legitimate digest
         that merely discusses usage limits as a topic is passed through
-        untouched instead of being mistaken for a limit notice."""
+        untouched instead of being mistaken for a limit notice.
+
+        processing_notice, when given, is sent once the lock is acquired —
+        i.e. only when this call is actually about to run, never when it's
+        about to bounce with "Still working on your last request." Web-tools
+        calls (news/research) can legitimately take minutes; without this,
+        the only feedback is a typing indicator, which reads as "stuck" on a
+        slow or long-running request."""
         telegram_chat_id = update.effective_chat.id
         lock_key = chat_id if chat_id is not None else telegram_chat_id
 
@@ -1472,6 +1498,8 @@ class YKBot:
             return None
 
         async with lock:
+            if processing_notice is not None:
+                await update.effective_message.reply_text(processing_notice)
             keep_typing = asyncio.create_task(self._keep_typing(context, telegram_chat_id))
             try:
                 return await self._claude.run(prompt, web_tools=web_tools)

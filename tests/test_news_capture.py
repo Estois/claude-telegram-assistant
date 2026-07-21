@@ -38,3 +38,19 @@ class NewsCaptureTests(AsyncBotTestCase):
         update = FakeUpdate(user_id=1, chat_id=1)
         await news_bot.handle_news(update, FakeContext(args=[]))  # usage message path
         self.assertEqual(news_bot._news_history_for("alice").recent(60, 100), [])
+
+    async def test_news_passes_a_processing_notice_mentioning_the_subject(self):
+        news_bot = self._make_bot()
+        captured = {}
+
+        async def fake_run_claude(update, context, prompt, **kwargs):
+            captured.update(kwargs)
+            return None
+
+        news_bot._run_claude = fake_run_claude
+        update = FakeUpdate(user_id=1, chat_id=1)
+
+        await news_bot.handle_news(update, FakeContext(args=["quantum", "computing"]))
+
+        self.assertIn("quantum computing", captured["processing_notice"])
+        self.assertIn("minutes", captured["processing_notice"])

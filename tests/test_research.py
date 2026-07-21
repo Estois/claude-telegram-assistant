@@ -97,6 +97,22 @@ class ResearchEntryPointTests(AsyncBotTestCase):
         self.assertIn("Research:", listing)
         self.assertIn("/research <subject>", listing)
 
+    async def test_research_passes_a_processing_notice_mentioning_the_subject(self):
+        b = self._make_bot()
+        captured = {}
+
+        async def fake_run_claude(update, context, prompt, **kwargs):
+            captured.update(kwargs)
+            return "Research Findings — fusion power\n\nBody."
+
+        b._run_claude = fake_run_claude
+        update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID)
+
+        await b.handle_research(update, FakeContext(args=["fusion", "power"]))
+
+        self.assertIn("fusion power", captured["processing_notice"])
+        self.assertIn("minutes", captured["processing_notice"])
+
 
 class ResearchFollowupTests(AsyncBotTestCase):
     CHAT_ID = 82
@@ -108,6 +124,7 @@ class ResearchFollowupTests(AsyncBotTestCase):
 
         async def fake_run_claude(update, context, prompt, **kwargs):
             fake_run_claude.last_prompt = prompt
+            fake_run_claude.last_kwargs = kwargs
             return reply
 
         b._run_claude = fake_run_claude
@@ -152,6 +169,27 @@ class ResearchFollowupTests(AsyncBotTestCase):
         await b.handle_research_followup(update, context)
 
         self.assertIn("MORE BREADTH", b._run_claude.last_prompt)
+
+    async def test_depth_tap_processing_notice_says_deeper(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID, callback_data="research:depth")
+        context = FakeContext(user_data={"research": self._state()})
+
+        await b.handle_research_followup(update, context)
+
+        notice = b._run_claude.last_kwargs["processing_notice"]
+        self.assertIn("deeper", notice)
+        self.assertIn("fusion power", notice)
+
+    async def test_breadth_tap_processing_notice_says_broader(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID, callback_data="research:breadth")
+        context = FakeContext(user_data={"research": self._state()})
+
+        await b.handle_research_followup(update, context)
+
+        notice = b._run_claude.last_kwargs["processing_notice"]
+        self.assertIn("broader", notice)
 
     async def test_followup_carries_home_button_from_stored_from_menu(self):
         b = self._make_bot()
