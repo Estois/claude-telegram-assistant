@@ -1,6 +1,7 @@
 from telegram.error import BadRequest
 
 import bot
+from ykbot import menus
 from ykbot.formatting import TelegramFormatter
 from tests.helpers import AsyncBotTestCase, FakeUpdate, make_config
 
@@ -103,3 +104,38 @@ class SendFormattedButtonTests(AsyncBotTestCase):
 
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1]["reply_markup"].inline_keyboard[0][0].callback_data, "home")
+
+    async def test_last_chunk_markup_overrides_the_home_default(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=1, chat_id=2)
+        custom = menus.research_followup_keyboard(from_menu=False)
+
+        await b._send_formatted(update, "short", from_menu=True, last_chunk_markup=custom)
+
+        markup = update.message.replies_markup[-1]
+        datas = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        self.assertIn("research:depth", datas)
+        self.assertNotIn("home", datas)
+
+    async def test_last_chunk_markup_only_on_the_final_chunk(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=1, chat_id=2)
+        text = self._long_text()
+        custom = menus.research_followup_keyboard(from_menu=False)
+
+        await b._send_formatted(update, text, last_chunk_markup=custom)
+
+        markups = update.message.replies_markup
+        self.assertIsNone(markups[0])
+        self.assertIsNone(markups[1])
+        self.assertIsNotNone(markups[2])
+
+    async def test_omitting_last_chunk_markup_keeps_old_default_behavior(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=1, chat_id=2)
+
+        await b._send_formatted(update, "short", from_menu=True)
+
+        self.assertEqual(
+            update.message.replies_markup[-1].inline_keyboard[0][0].callback_data, "home"
+        )

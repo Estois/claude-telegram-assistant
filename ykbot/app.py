@@ -1395,18 +1395,29 @@ class YKBot:
             **kwargs,
         )
 
-    async def _send_formatted(self, update: Update, text: str, from_menu: bool = False) -> None:
+    async def _send_formatted(
+        self, update: Update, text: str, from_menu: bool = False,
+        last_chunk_markup: Optional[InlineKeyboardMarkup] = None,
+    ) -> None:
         """Sends Claude's reply, chunked for Telegram's message limit. Tries
         HTML formatting first and falls back to plain text per chunk if the
         markup doesn't parse — LLM-generated tags aren't guaranteed
         well-formed, so a broken reply must never mean a lost reply.
 
-        The 🏠 Menu button goes on the LAST chunk only, so a multi-chunk digest
-        ends with one button rather than one per message."""
+        The button goes on the LAST chunk only, so a multi-chunk reply ends
+        with one button row rather than one per message. last_chunk_markup,
+        when given, replaces the default "home button only if from_menu"
+        logic entirely — used by /research to attach its depth/breadth row
+        (plus 🏠 when appropriate) instead of the plain home button."""
         chunks = TelegramFormatter.chunk(text)
         for index, chunk in enumerate(chunks):
             last = index == len(chunks) - 1
-            markup = menus.home_keyboard() if (from_menu and last) else None
+            if not last:
+                markup = None
+            elif last_chunk_markup is not None:
+                markup = last_chunk_markup
+            else:
+                markup = menus.home_keyboard() if from_menu else None
             try:
                 await update.effective_message.reply_text(
                     chunk, parse_mode=ParseMode.HTML, reply_markup=markup
