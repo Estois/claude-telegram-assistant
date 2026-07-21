@@ -107,6 +107,59 @@ class NewsPromptBuilderTests(BotTestCase):
         self.assertIn("past 3 days", prompt)
 
 
+class ResearchPromptBuilderTests(BotTestCase):
+    def _make_bot(self):
+        b = bot.YKBot(make_config(self.tmp_path))
+        b._interests_for = lambda account_id: ExplodingStore()
+        return b
+
+    def test_initial_mentions_subject_and_is_not_time_boxed(self):
+        b = self._make_bot()
+
+        prompt = b._build_research_prompt("fusion power", [], mode="initial").lower()
+
+        self.assertIn("fusion power", prompt)
+        self.assertIn("not limited to", prompt)
+        self.assertNotIn("past 7 days", prompt)
+
+    def test_initial_header_marker_is_research_findings(self):
+        b = self._make_bot()
+
+        prompt = b._build_research_prompt("fusion power", [], mode="initial")
+
+        self.assertIn("Research Findings", prompt)
+
+    def test_depth_embeds_previous_findings(self):
+        b = self._make_bot()
+
+        prompt = b._build_research_prompt(
+            "fusion power", [], mode="depth",
+            previous_findings="Research Findings — fusion power\n\nSome prior text.",
+        )
+
+        self.assertIn("Some prior text.", prompt)
+        self.assertIn("more depth", prompt.lower())
+
+    def test_breadth_embeds_previous_findings(self):
+        b = self._make_bot()
+
+        prompt = b._build_research_prompt(
+            "fusion power", [], mode="breadth",
+            previous_findings="Research Findings — fusion power\n\nSome prior text.",
+        )
+
+        self.assertIn("Some prior text.", prompt)
+        self.assertIn("wide", prompt.lower())
+
+    def test_interests_are_injected_and_not_instructed_to_be_revealed(self):
+        b = self._make_bot()
+
+        prompt = b._build_research_prompt("fusion power", ["clean energy"], mode="initial")
+
+        self.assertIn("clean energy", prompt)
+        self.assertIn("do not mention this list", prompt.lower())
+
+
 class UserListingBuilderTests(BotTestCase):
     def test_takes_account_ids_and_marks_sessions(self):
         b = bot.YKBot(make_config(self.tmp_path))

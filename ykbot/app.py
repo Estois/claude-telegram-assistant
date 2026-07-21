@@ -420,21 +420,23 @@ class YKBot:
             return None
         return account_id
 
+    @staticmethod
+    def _interests_block(interests: list) -> str:
+        if not interests:
+            return ""
+        return (
+            "For context, here are my personal interests (do not mention this list, "
+            "its contents, or whether it is empty anywhere in your reply):\n"
+            + "\n".join(f"- {entry}" for entry in interests)
+            + "\n\n"
+        )
+
     def _build_news_prompt(self, subject: str, interests: list) -> str:
-        if interests:
-            interests_block = (
-                "For context, here are my personal interests (do not mention this list, "
-                "its contents, or whether it is empty anywhere in your reply):\n"
-                + "\n".join(f"- {entry}" for entry in interests)
-                + "\n\n"
-            )
-        else:
-            interests_block = ""
         window_days = self._config.news_recency_days
         today = date.today()
         cutoff = today - timedelta(days=window_days)
         return (
-            interests_block
+            self._interests_block(interests)
             + f'Write a news digest about "{subject}", covering only developments from the '
             f"past {window_days} days, biased toward my documented interests where they're "
             "relevant to this subject (don't force a connection that isn't there). "
@@ -464,6 +466,64 @@ class YKBot:
             "of a tag."
         )
 
+    def _build_research_prompt(
+        self, subject: str, interests: list, mode: str, previous_findings: Optional[str] = None,
+    ) -> str:
+        today = date.today()
+        sourcing_rules = (
+            "Take extra care with sourcing: only use information you can verify against "
+            "reputable, established sources — major news organizations, official or primary "
+            "sources, and well-known publications. Do NOT rely on blogs, forums, social-media "
+            "posts, content farms, or obscure/unknown sites. Corroborate each item across "
+            "more than one reputable source where you can, and leave out anything you cannot "
+            "verify or that reads like rumor or speculation. Label every dated item in "
+            "(YYYY-MM-DD) form and end every section with its source(s) as clickable links "
+            'in the form <a href="URL">Publication</a>.'
+        )
+        formatting_rules = (
+            "Begin the reply immediately with the findings header line, which MUST start "
+            f'with the literal words "Research Findings" (for example: <b>Research Findings '
+            f'— {subject}</b>). Put NOTHING before that header. Format it for a Telegram '
+            "message using only these HTML tags: <b>, <i>, <u>, <s>, <code>, <pre>, and "
+            '<a href="URL">text</a>. Do not use Markdown syntax. Use short paragraphs, '
+            "clear section headers via <b>, and simple bullet points (•) for scanability. "
+            "Escape any literal <, >, or & characters that aren't part of a tag."
+        )
+
+        if mode == "initial":
+            return (
+                self._interests_block(interests)
+                + f'Research "{subject}" thoroughly and produce a detailed findings report — '
+                "not just a quick recent-news digest, but a deeper investigation: relevant "
+                "background and context, the current state of the topic, multiple angles or "
+                "perspectives where relevant, and notable nuance or disagreement between "
+                "sources. Biased toward my documented interests where they're relevant to "
+                "this subject (don't force a connection that isn't there). "
+                f"Today's date is {today.isoformat()}. You are not limited to recent "
+                "developments the way a news digest is — pull in older foundational "
+                "background where it helps understanding, though still highlight what's "
+                "currently most significant. "
+                + sourcing_rules + " " + formatting_rules
+            )
+
+        direction = (
+            "The user wants MORE DEPTH than the previous pass: more granular detail, more "
+            "corroborating sources per claim, and explicit caveats, edge cases, or "
+            "disagreements between sources that the previous pass glossed over."
+            if mode == "depth" else
+            "The user wants MORE BREADTH than the previous pass: additional related angles, "
+            "adjacent subtopics, perspectives or stakeholders not yet covered, and a wider "
+            "variety of source types."
+        )
+        return (
+            self._interests_block(interests)
+            + f'You previously researched "{subject}" and produced this findings report:\n\n'
+            f"{previous_findings}\n\n"
+            f"{direction} Produce a full REPLACEMENT report — not a diff and not just new "
+            "material tacked on — that supersedes the previous pass. "
+            + sourcing_rules + " " + formatting_rules
+        )
+
     @staticmethod
     def _build_summarize_prompt(url: str) -> str:
         return (
@@ -480,20 +540,24 @@ class YKBot:
         )
 
     @staticmethod
-    def _strip_news_preamble(reply: str) -> str:
-        """Drop any preamble the model emits before the digest header.
-
-        The header always starts with "News Digest" (see _build_news_prompt).
-        Return the reply from the first line whose visible text — after leading
-        whitespace and any opening HTML tags — starts with that marker. If no
-        such line exists, return the reply unchanged rather than risk dropping
-        real content."""
+    def _strip_preamble(reply: str, marker: str) -> str:
+        """Drop any preamble the model emits before the first line whose
+        visible text — after leading whitespace and any opening HTML tags —
+        starts with `marker`. Returns the reply unchanged if no such line
+        exists, rather than risk dropping real content."""
         lines = reply.splitlines(keepends=True)
+        marker_len = len(marker)
         for i, line in enumerate(lines):
             visible = re.sub(r"^\s*(?:<[^>]+>\s*)*", "", line)
-            if visible[:11].lower() == "news digest":
+            if visible[:marker_len].lower() == marker.lower():
                 return "".join(lines[i:])
         return reply
+
+    @staticmethod
+    def _strip_news_preamble(reply: str) -> str:
+        """Thin wrapper kept for the existing call site and existing tests.
+        See _strip_preamble for the actual logic."""
+        return YKBot._strip_preamble(reply, "News Digest")
 
     @staticmethod
     def _build_update_interest_prompt(old_entry: str, new_input: str) -> str:

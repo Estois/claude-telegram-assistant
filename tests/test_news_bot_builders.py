@@ -122,6 +122,16 @@ class YKBotBuilderTests(BotTestCase):
         reply = "Some reply with no header marker at all."
         self.assertEqual(bot.YKBot._strip_news_preamble(reply), reply)
 
+    def test_strip_preamble_generic_marker(self):
+        reply = "Blah blah.\n\nResearch Findings — X\n\nBody"
+        cleaned = bot.YKBot._strip_preamble(reply, "Research Findings")
+        self.assertTrue(cleaned.startswith("Research Findings — X"))
+
+    def test_strip_news_preamble_still_works_as_a_thin_wrapper(self):
+        reply = "Preamble.\n\nNews Digest — X — 2026-07-17\n\nBody"
+        cleaned = bot.YKBot._strip_news_preamble(reply)
+        self.assertTrue(cleaned.startswith("News Digest — X"))
+
     def test_account_dir_creates_directory_and_returns_path(self):
         news_bot = self._make_bot()
 

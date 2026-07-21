@@ -89,7 +89,7 @@ class ResearchPromptBuilderTests(BotTestCase):
         )
 
         self.assertIn("Some prior text.", prompt)
-        self.assertIn("deep", prompt.lower())
+        self.assertIn("more depth", prompt.lower())
 
     def test_breadth_embeds_previous_findings(self):
         b = self._make_bot()
