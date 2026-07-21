@@ -324,6 +324,7 @@ class YKBot:
         app.add_handler(CallbackQueryHandler(
             self.handle_menu_action,
             pattern=r"^act:(getinterests|compile|endsession|news|summarize|addinterest|research)$"))
+        app.add_handler(CallbackQueryHandler(self.handle_research_followup, pattern=r"^research:"))
         app.add_handler(CallbackQueryHandler(self.handle_interest_pick, pattern=r"^int_pick:"))
         app.add_handler(CallbackQueryHandler(self.handle_interest_select, pattern=r"^int_(rm|upd):"))
         app.add_handler(CallbackQueryHandler(
@@ -868,6 +869,49 @@ class YKBot:
         findings = self._strip_preamble(reply, "Research Findings")
         context.user_data["research"] = {
             "subject": subject, "findings": findings, "from_menu": from_menu,
+        }
+        await self._send_formatted(
+            update, findings, from_menu,
+            last_chunk_markup=menus.research_followup_keyboard(from_menu),
+        )
+
+    async def handle_research_followup(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        mode = query.data.split(":", 1)[1]  # "depth" or "breadth"
+        state = context.user_data.get("research")
+        if state is None:
+            await update.effective_message.reply_text(
+                "This research thread has expired — run /research <subject> again."
+            )
+            return
+        await self._do_research_followup(update, context, account_id, state, mode)
+
+    async def _do_research_followup(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        account_id: str,
+        state: dict,
+        mode: str,
+    ) -> None:
+        interests = await asyncio.to_thread(self._interests_for(account_id).list)
+        prompt = self._build_research_prompt(
+            state["subject"], interests, mode=mode, previous_findings=state["findings"],
+        )
+        reply = await self._run_claude(update, context, prompt, web_tools=True)
+        if reply is None:
+            return
+        findings = self._strip_preamble(reply, "Research Findings")
+        from_menu = state["from_menu"]
+        context.user_data["research"] = {
+            "subject": state["subject"], "findings": findings, "from_menu": from_menu,
         }
         await self._send_formatted(
             update, findings, from_menu,

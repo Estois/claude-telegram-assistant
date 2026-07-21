@@ -65,6 +65,12 @@ class LockedPathTests(AsyncBotTestCase):
         await news_bot.handle_news(update, FakeContext(args=["x"]))
         await self._assert_trivia(update)
 
+    async def test_research_locked(self):
+        news_bot = self._make_bot()
+        update = self._update()
+        await news_bot.handle_research(update, FakeContext(args=["x"]))
+        await self._assert_trivia(update)
+
     async def test_add_interests_locked(self):
         news_bot = self._make_bot()
         update = self._update()

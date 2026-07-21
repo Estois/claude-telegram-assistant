@@ -70,6 +70,21 @@ class AppMiscTests(AsyncBotTestCase):
 
         self.assertTrue(update.message.replies)  # digest still sent
 
+    async def test_research_history_append_failure_does_not_break_the_findings(self):
+        news_bot = self._make_bot()
+
+        class BadHistory:
+            def append(self, subject):
+                raise RuntimeError("disk full")
+
+        news_bot._news_history_for = lambda account_id: BadHistory()
+        self._stub_run_claude(news_bot, "Research Findings — topic")
+        update = self._update()
+
+        await news_bot.handle_research(update, FakeContext(args=["topic"]))
+
+        self.assertTrue(update.message.replies)  # findings still sent
+
     # -- bus/location branches ----------------------------------------------
     async def test_describe_stop_uses_cache_description(self):
         news_bot = self._make_bot()
