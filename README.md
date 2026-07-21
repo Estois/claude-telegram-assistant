@@ -18,6 +18,7 @@ whichever account your password unlocked (see Accounts).
 | Command | Does |
 | --- | --- |
 | `/news <subject>` | Generates a news digest on `<subject>` from the past week only, biased toward your account's saved interests |
+| `/research <subject>` | Deeper, non-time-boxed research on `<subject>` — background, current state, multiple angles. The result has 🔍 More depth / 🌐 More breadth buttons to refine it further |
 | `/summarize <url>` | Fetches a public web page and summarizes it (internal/private URLs are refused) |
 | `/addinterests <topic>` | Adds an interest — a word, sentence, or paragraph |
 | `/getinterests` | Lists your account's interests with their index |
@@ -29,10 +30,10 @@ whichever account your password unlocked (see Accounts).
 | `/help` | Lists all commands, grouped by category |
 
 Interests are stored as a numbered list in `accounts/<id>/interests.md` —
-`/news` reads the current account's file before writing each digest, so
-changes take effect immediately with no restart needed. The file is
-managed through the commands above; hand-editing it works too as long as
-entries stay in `N. text` form.
+`/news` and `/research` both read the current account's file before writing
+each reply, so changes take effect immediately with no restart needed. The
+file is managed through the commands above; hand-editing it works too as
+long as entries stay in `N. text` form.
 
 Every `INTERESTS_REORGANIZE_INTERVAL_SECONDS` (default 86400 = daily), a
 background job runs once per account: it sends that account's interests
@@ -51,8 +52,9 @@ reorganized list, same as `/getinterests`.
 
 ### Passive interest learning
 
-Each time you run `/news <subject>`, the subject is logged to your account's
-`accounts/<id>/news_history.jsonl` (gitignored as part of the `accounts/`
+Each time you run `/news <subject>` or `/research <subject>` (the initial
+call only, not its depth/breadth follow-ups), the subject is logged to your
+account's `accounts/<id>/news_history.jsonl` (gitignored as part of the `accounts/`
 directory, since it contains real data about user requests). The daily
 background job and `/compileinterests` both examine this log to detect
 recurring request themes and fold them into your interests automatically —
@@ -89,12 +91,13 @@ runs the same handler code as its slash-command equivalent. All slash
 commands keep working unchanged, and `/help` stays slash-only (it's not on
 the board).
 
-The top-level board has 🚌 Bus, 📰 News, ⭐ Interests, 🔗 Summarize, and 🔒 End
-session, plus a 🛠 Admin row shown only to an admin session. Bus opens the
-same fav-stop menu as `/bus`. News, Summarize, and Interests → ➕ Add each
-arm a one-shot capture and prompt for text — your next plain message is
-read as that command's argument instead of a password attempt. End session
-asks for a ✅ Yes/❌ No confirmation before locking.
+The top-level board has 🚌 Bus, 📰 News, 🔬 Research, 🔗 Summarize,
+⭐ Interests, and 🔒 End session, plus a 🛠 Admin row shown only to an admin
+session. Bus opens the same fav-stop menu as `/bus`. News, Research,
+Summarize, and Interests → ➕ Add each arm a one-shot capture and prompt for
+text — your next plain message is read as that command's argument instead
+of a password attempt. End session asks for a ✅ Yes/❌ No confirmation
+before locking.
 
 Results you got from the menu come back with a 🏠 Menu button attached — tapping
 it posts a fresh menu **below** the result rather than replacing it, so a digest
@@ -104,6 +107,16 @@ the menus still navigate by editing in place, which is what you want for a
 throwaway menu screen. Old 🏠 buttons stay tappable indefinitely and always render
 a current menu — button presence is never authorization, so every action still
 re-checks your session.
+
+Every `/research` result — whether typed or reached via the menu — carries
+🔍 More depth and 🌐 More breadth buttons. Tapping either re-runs the
+research in that direction (deeper detail and sourcing, or a wider set of
+angles/subtopics) and delivers a **new** message with an updated report,
+rather than editing the one you're reading. The thread state (subject +
+latest findings) lives only in memory for as long as the bot process runs —
+if it restarts, tapping an old depth/breadth button gets you a friendly
+"this research thread has expired" message instead of a crash, and you just
+run `/research <subject>` again.
 
 Tapping ⭐ Interests opens a submenu: 📋 List, ➕ Add, ✏️ Update, 🗑 Remove,
 🗂 Compile, and ⬅️ Back. Update and Remove first show one button per saved
@@ -472,7 +485,8 @@ Optional environment variables (see `.env.example`):
 
 **Claude runs with no host access.** Every `claude -p` call is launched with
 `--tools` restricted to a hard allowlist — only `WebSearch`/`WebFetch` for
-`/news`, and *no tools at all* for the interest commands. `Bash`, `Read`,
+`/news`, `/research` (including its depth/breadth follow-ups), and
+`/summarize`, and *no tools at all* for the interest commands. `Bash`, `Read`,
 `Write`, and `Edit` are never available, so a prompt injection (via a `/news`
 subject, an interest entry, etc.) cannot be turned into file access or shell
 commands on the machine. (`--tools` limits tool *availability* even under
