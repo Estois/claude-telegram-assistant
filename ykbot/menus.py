@@ -14,9 +14,10 @@ def top_level_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🚌 Bus", callback_data="act:bus"),
          InlineKeyboardButton("📰 News", callback_data="act:news")],
-        [InlineKeyboardButton("⭐ Interests", callback_data="menu:interests"),
+        [InlineKeyboardButton("🔬 Research", callback_data="act:research"),
          InlineKeyboardButton("🔗 Summarize", callback_data="act:summarize")],
-        [InlineKeyboardButton("🔒 End session", callback_data="act:endsession")],
+        [InlineKeyboardButton("⭐ Interests", callback_data="menu:interests"),
+         InlineKeyboardButton("🔒 End session", callback_data="act:endsession")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🛠 Admin", callback_data="menu:admin")])
@@ -78,3 +79,16 @@ def home_keyboard() -> InlineKeyboardMarkup:
     that one navigates by editing the message in place, which would destroy
     the very result this button is attached to."""
     return InlineKeyboardMarkup([[HOME_BUTTON]])
+
+
+def research_followup_keyboard(from_menu: bool) -> InlineKeyboardMarkup:
+    """Depth/breadth buttons go on every /research finding regardless of how
+    it was reached; the 🏠 row only when the research thread started from
+    the button menu, matching every other result message in this bot."""
+    rows = [[
+        InlineKeyboardButton("🔍 More depth", callback_data="research:depth"),
+        InlineKeyboardButton("🌐 More breadth", callback_data="research:breadth"),
+    ]]
+    if from_menu:
+        rows.append([HOME_BUTTON])
+    return InlineKeyboardMarkup(rows)

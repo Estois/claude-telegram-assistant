@@ -15,12 +15,28 @@ class TopLevelKeyboardTests(unittest.TestCase):
     def test_non_admin_has_no_admin_row(self):
         d = datas(menus.top_level_keyboard(is_admin=False))
         self.assertEqual(
-            d, ["act:bus", "act:news", "menu:interests", "act:summarize", "act:endsession"]
+            d,
+            [
+                "act:bus", "act:news",
+                "act:research", "act:summarize",
+                "menu:interests", "act:endsession",
+            ],
         )
         self.assertNotIn("menu:admin", d)
 
     def test_admin_gets_admin_row(self):
         self.assertIn("menu:admin", datas(menus.top_level_keyboard(is_admin=True)))
+
+
+class ResearchFollowupKeyboardTests(unittest.TestCase):
+    def test_always_has_depth_and_breadth(self):
+        d = datas(menus.research_followup_keyboard(from_menu=False))
+        self.assertIn("research:depth", d)
+        self.assertIn("research:breadth", d)
+        self.assertNotIn("home", d)
+
+    def test_home_row_only_when_from_menu(self):
+        self.assertIn("home", datas(menus.research_followup_keyboard(from_menu=True)))
 
 
 class InterestsKeyboardTests(unittest.TestCase):
