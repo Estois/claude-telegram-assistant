@@ -174,6 +174,12 @@ class YKBot:
                 category="News",
             ),
             CommandSpec(
+                "research", "/research <subject>",
+                "deeper background and multiple angles on a subject — not limited to "
+                "recent news like /news", self.handle_research,
+                category="Research",
+            ),
+            CommandSpec(
                 "summarize", "/summarize <url>",
                 "summarize a web page", self.handle_summarize,
                 category="Tools",
@@ -317,7 +323,7 @@ class YKBot:
         app.add_handler(CallbackQueryHandler(self.handle_menu_bus, pattern=r"^act:bus$"))
         app.add_handler(CallbackQueryHandler(
             self.handle_menu_action,
-            pattern=r"^act:(getinterests|compile|endsession|news|summarize|addinterest)$"))
+            pattern=r"^act:(getinterests|compile|endsession|news|summarize|addinterest|research)$"))
         app.add_handler(CallbackQueryHandler(self.handle_interest_pick, pattern=r"^int_pick:"))
         app.add_handler(CallbackQueryHandler(self.handle_interest_select, pattern=r"^int_(rm|upd):"))
         app.add_handler(CallbackQueryHandler(
@@ -698,6 +704,11 @@ class YKBot:
                 "Send the subject for your news digest:",
                 reply_markup=menus.back_keyboard("menu:root"),
             )
+        elif action == "research":
+            context.user_data["awaiting"] = {"kind": "research_subject", "payload": {}}
+            await query.edit_message_text(
+                "Send the subject to research:", reply_markup=menus.back_keyboard("menu:root")
+            )
         elif action == "summarize":
             context.user_data["awaiting"] = {"kind": "summarize_url", "payload": {}}
             await query.edit_message_text(
@@ -818,6 +829,50 @@ class YKBot:
         )
         if reply is not None:
             await self._send_formatted(update, self._strip_news_preamble(reply), from_menu)
+
+    async def handle_research(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        account_id = await self._require_session(update)
+        if account_id is None:
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: /research <subject>\nExample: /research fusion power"
+            )
+            return
+
+        await self._do_research(update, context, account_id, " ".join(context.args))
+
+    async def _do_research(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        account_id: str,
+        subject: str,
+        from_menu: bool = False,
+    ) -> None:
+        if self._config.news_learning_enabled:
+            try:
+                await asyncio.to_thread(self._news_history_for(account_id).append, subject)
+            except Exception:
+                # Logging the subject must never break the findings reply.
+                logger.exception("Failed to log /research subject for %s", account_id)
+        interests = await asyncio.to_thread(self._interests_for(account_id).list)
+        reply = await self._run_claude(
+            update, context,
+            self._build_research_prompt(subject, interests, mode="initial"),
+            web_tools=True,
+        )
+        if reply is None:
+            return
+        findings = self._strip_preamble(reply, "Research Findings")
+        context.user_data["research"] = {
+            "subject": subject, "findings": findings, "from_menu": from_menu,
+        }
+        await self._send_formatted(
+            update, findings, from_menu,
+            last_chunk_markup=menus.research_followup_keyboard(from_menu),
+        )
 
     async def handle_summarize(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -1220,6 +1275,8 @@ class YKBot:
             await self._bus.prompt_add_bus_stop(update, context, account_id, text)
         elif kind == "news_subject":
             await self._do_news(update, context, account_id, text.strip(), from_menu=True)
+        elif kind == "research_subject":
+            await self._do_research(update, context, account_id, text.strip(), from_menu=True)
         elif kind == "summarize_url":
             url = text.strip()
             if not self._is_fetchable_url(url):
