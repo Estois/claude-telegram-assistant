@@ -98,6 +98,14 @@ class NewsPromptBuilderTests(BotTestCase):
 
         self.assertIn("space", prompt)
 
+    def test_recency_window_uses_configured_days(self):
+        b = bot.YKBot(make_config(self.tmp_path, news_recency_days=3))
+        b._interests_for = lambda account_id: ExplodingStore()
+
+        prompt = b._build_news_prompt("space", [])
+
+        self.assertIn("past 3 days", prompt)
+
 
 class UserListingBuilderTests(BotTestCase):
     def test_takes_account_ids_and_marks_sessions(self):

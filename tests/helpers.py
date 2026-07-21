@@ -198,6 +198,7 @@ def make_config(tmp_path: Path, **overrides) -> "bot.Config":
         news_learning_enabled=True,
         news_history_window_days=60,
         news_history_max_entries=100,
+        news_recency_days=7,
         message_logging_enabled=True,
         message_logs_dir=tmp_path / "message_logs",
     )

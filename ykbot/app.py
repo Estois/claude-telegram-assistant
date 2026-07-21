@@ -7,6 +7,7 @@ This is the one stateful class; every ``self._x`` it touches is set up in
 import asyncio
 import logging
 import re
+from datetime import date, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional, Union
@@ -429,11 +430,19 @@ class YKBot:
             )
         else:
             interests_block = ""
+        window_days = self._config.news_recency_days
+        today = date.today()
+        cutoff = today - timedelta(days=window_days)
         return (
             interests_block
-            + f'Write a news digest about "{subject}", covering the most significant recent '
-            "developments, biased toward my documented interests where they're relevant to "
-            "this subject (don't force a connection that isn't there). "
+            + f'Write a news digest about "{subject}", covering only developments from the '
+            f"past {window_days} days, biased toward my documented interests where they're "
+            "relevant to this subject (don't force a connection that isn't there). "
+            f"Today's date is {today.isoformat()}. Only include items dated on or after "
+            f"{cutoff.isoformat()}; exclude anything older than that, even if it is still "
+            "widely discussed or you would otherwise consider it significant. If you cannot "
+            f"find enough verifiable developments from the past {window_days} days, say so "
+            "plainly rather than reaching further back or padding with older context. "
             "Take extra care with sourcing: only use information you can verify against "
             "reputable, established sources — major news organizations, official or primary "
             "sources, and well-known publications. Do NOT rely on blogs, forums, social-media "

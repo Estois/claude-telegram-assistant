@@ -72,6 +72,32 @@ class YKBotBuilderTests(BotTestCase):
         self.assertIn("date", prompt)        # dates for each item
         self.assertIn("source", prompt)      # sources embedded per item
 
+    def test_news_prompt_defaults_to_past_week(self):
+        news_bot = self._make_bot()
+
+        prompt = news_bot._build_news_prompt("tokyo", [])
+
+        self.assertIn("past 7 days", prompt)
+
+    def test_news_prompt_states_todays_date_and_cutoff(self):
+        import datetime
+
+        news_bot = self._make_bot()
+        today = datetime.date.today()
+        cutoff = today - datetime.timedelta(days=7)
+
+        prompt = news_bot._build_news_prompt("tokyo", [])
+
+        self.assertIn(today.isoformat(), prompt)
+        self.assertIn(cutoff.isoformat(), prompt)
+
+    def test_news_prompt_recency_window_is_configurable(self):
+        news_bot = self._make_bot(news_recency_days=14)
+
+        prompt = news_bot._build_news_prompt("tokyo", [])
+
+        self.assertIn("past 14 days", prompt)
+
     def test_strip_news_preamble_removes_text_before_header(self):
         reply = (
             "Now I have enough for the digest, with a natural tie-in.\n\n"

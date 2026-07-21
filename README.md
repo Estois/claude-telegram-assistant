@@ -17,7 +17,7 @@ whichever account your password unlocked (see Accounts).
 
 | Command | Does |
 | --- | --- |
-| `/news <subject>` | Generates a news digest on `<subject>`, biased toward your account's saved interests |
+| `/news <subject>` | Generates a news digest on `<subject>` from the past week only, biased toward your account's saved interests |
 | `/summarize <url>` | Fetches a public web page and summarizes it (internal/private URLs are refused) |
 | `/addinterests <topic>` | Adds an interest — a word, sentence, or paragraph |
 | `/getinterests` | Lists your account's interests with their index |
@@ -461,6 +461,7 @@ Optional environment variables (see `.env.example`):
 | `NEWS_LEARNING_ENABLED` | `true` | Enable passive learning from `/news` requests; set to `false` to disable logging |
 | `NEWS_HISTORY_WINDOW_DAYS` | `60` | How many days of `/news` history to consider when detecting recurring themes |
 | `NEWS_HISTORY_MAX_ENTRIES` | `100` | Maximum logged `/news` requests per account; oldest entries are pruned first |
+| `NEWS_RECENCY_DAYS` | `7` | How many days back `/news` digests are allowed to draw developments from |
 | `MESSAGE_LOGGING_ENABLED` | `true` | Log messages from unlocked chats to `message_logs/`; set to `false` to disable |
 | `MESSAGE_LOGS_DIR` | `message_logs/` | Directory holding the per-user message log files |
 | `ENV_FILE` | `.env` | Path `/adduserteleid` rewrites `TELEGRAM_ALLOWED_USER_IDS` in |
