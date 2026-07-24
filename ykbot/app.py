@@ -1773,7 +1773,7 @@ class YKBot:
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=self._build_welcome_text(name),
-                reply_markup=menus.top_level_keyboard(self._is_admin(update, account_id)),
+                reply_markup=self._menu_markup(update, account_id),
             )
             return
 

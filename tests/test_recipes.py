@@ -324,6 +324,33 @@ class RecipeMenuWiringTests(AsyncBotTestCase):
 
         self.assertNotIn("menu:recipes", datas(update.message.replies_markup[-1]))
 
+    async def test_welcome_screen_on_unlock_shows_recipes_button_for_member(self):
+        # Regression: the unlock flow (handle_plain_text) used to build its
+        # own keyboard inline via menus.top_level_keyboard(...) instead of
+        # going through _menu_markup, so it never passed is_closed — a
+        # closed member's very first menu, shown right after typing their
+        # password, was missing the 🍳 Recipes row until they navigated
+        # away and back.
+        b = self._make_bot()
+        update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID, text="bethpass")
+        context = FakeContext()
+
+        await b.handle_plain_text(update, context)
+
+        chat_id, text, markup = context.bot.sent[0]
+        self.assertIn("Welcome", text)
+        self.assertIn("menu:recipes", datas(markup))
+
+    async def test_welcome_screen_on_unlock_hides_recipes_button_for_non_member(self):
+        b = self._make_bot()
+        update = FakeUpdate(user_id=1, chat_id=self.CHAT_ID, text="davepass")
+        context = FakeContext()
+
+        await b.handle_plain_text(update, context)
+
+        chat_id, text, markup = context.bot.sent[0]
+        self.assertNotIn("menu:recipes", datas(markup))
+
     async def test_menu_nav_recipes_for_member(self):
         b = self._make_bot()
         self._unlock(b, "beth")

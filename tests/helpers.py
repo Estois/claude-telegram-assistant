@@ -146,7 +146,7 @@ class FakeBot:
     records send_message/delete_message calls for assertions."""
 
     def __init__(self):
-        self.sent: list = []  # (chat_id, text) tuples
+        self.sent: list = []  # (chat_id, text, reply_markup) tuples
         self.deleted: list = []  # (chat_id, message_id) tuples
         self.actions: list = []  # (chat_id, action) tuples
 
@@ -154,7 +154,7 @@ class FakeBot:
         self.actions.append((chat_id, action))
 
     async def send_message(self, chat_id, text, **kwargs):
-        self.sent.append((chat_id, text))
+        self.sent.append((chat_id, text, kwargs.get("reply_markup")))
 
     async def delete_message(self, chat_id, message_id):
         self.deleted.append((chat_id, message_id))
