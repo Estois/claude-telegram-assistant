@@ -160,6 +160,52 @@ class CallbackSafetyTests(AsyncBotTestCase):
         self.assertEqual(update.callback_query.last_text, "Session ended.")
         self.assertFalse(b._accounts.has_active_session("alice"))
 
+    # -- handle_recipe_pick / handle_recipe_select / recipes menu wiring --------
+
+    async def test_menu_action_addrecipe(self):
+        b = self._make_bot()
+        self._unlock(b, account="amy")  # amy is in the default closed group
+        update = self._update("act:addrecipe")
+        context = FakeContext()
+
+        await b.handle_menu_action(update, context)
+
+        self.assertEqual(context.user_data["awaiting"]["kind"], "recipe_raw")
+        self.assertIsNone(update.message)
+
+    async def test_recipe_pick_view(self):
+        b = self._make_bot()
+        self._unlock(b, account="amy")
+        b._recipes_for("amy").add("Banana Bread", "body")
+        update = self._update("rcp_pick:view")
+
+        await b.handle_recipe_pick(update, FakeContext())
+
+        self.assertIn("Pick a recipe to view", update.callback_query.last_text)
+        self.assertIsNone(update.message)
+
+    async def test_recipe_select_view(self):
+        b = self._make_bot()
+        self._unlock(b, account="amy")
+        b._recipes_for("amy").add("Banana Bread", "<b>Ingredients</b>\n• bananas")
+        update = self._update("rcp_view:1")
+
+        await b.handle_recipe_select(update, FakeContext())
+
+        self.assertIn("Banana Bread", update.callback_query.last_text)
+        self.assertIsNone(update.message)
+
+    async def test_confirm_remove_recipe(self):
+        b = self._make_bot()
+        self._unlock(b, account="amy")
+        b._recipes_for("amy").add("Gone Soon", "body")
+        update = self._update("cfm:rcp_rm:1")
+
+        await b.handle_confirm(update, FakeContext())
+
+        self.assertIn("Removed recipe #1", update.effective_message.replies[-1])
+        self.assertIsNone(update.message)
+
     # -- handle_admin_action / handle_admin_select_remove -----------------------
 
     async def test_admin_action_getusers(self):

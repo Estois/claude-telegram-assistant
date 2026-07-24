@@ -39,27 +39,21 @@ class YKBotBuilderTests(BotTestCase):
         listing = news_bot._build_command_list(closed=False)
 
         self.assertNotIn("/secretmenu", listing)
+        # The Closed group must stay invisible as a concept: no labeled
+        # section anywhere hints that something extra exists.
         self.assertNotIn("Closed:", listing)
 
-    def test_build_command_list_includes_closed_section_when_closed_true(self):
+    def test_build_command_list_folds_closed_only_into_its_ordinary_category(self):
         news_bot = self._make_bot()
         self._add_closed_only_spec(news_bot)
 
         listing = news_bot._build_command_list(closed=True)
 
-        self.assertIn("Closed:", listing)
-        self.assertIn("/secretmenu", listing)
-
-    def test_closed_only_never_leaks_into_a_category_section(self):
-        news_bot = self._make_bot()
-        self._add_closed_only_spec(news_bot)
-
-        listing = news_bot._build_command_list(admin=True, closed=True)
-
-        # /secretmenu belongs to the "Menu" category but must appear only
-        # under "Closed:", not duplicated under "Menu:" too.
-        menu_section = listing.split("Closed:")[0]
-        self.assertNotIn("/secretmenu", menu_section)
+        # No separate "Closed:" section — the command just appears inside
+        # its normal category, indistinguishable from any other command.
+        self.assertNotIn("Closed:", listing)
+        menu_section = listing.split("Menu:", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("/secretmenu", menu_section)
 
     def test_build_command_list_is_grouped_by_category(self):
         news_bot = self._make_bot()

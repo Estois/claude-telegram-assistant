@@ -251,15 +251,46 @@ specifically for commands that can modify *other* accounts. The admin
 account is included in the default closed list too, by convention, not by
 any special-casing in the code.
 
-No command uses this yet — it's plumbing for future features that should
-launch to a smaller group first. To gate a new command, add
-`closed_only=True` to its `CommandSpec` in `_build_command_specs` and call
-`self._require_closed(update)` instead of `self._require_session(update)`
-at the top of its handler (mirrors exactly how `admin_only` +
-`_require_admin` already work). Same non-enumeration guarantee as
-admin-only commands: a non-member gets the same animal-fact reply as an
-unrecognized command, and `closed_only` commands only render in `/help`
-for a session whose account is in `CLOSED_ACCOUNT_IDS`.
+Unlike the admin tier, **the Closed group is deliberately invisible as a
+concept** — nobody, member or not, should be able to tell it exists. There
+is no "Closed:" label anywhere. A member's `/help` and button menu just
+show the gated commands folded into their ordinary category (e.g.
+`/addrecipe` sits under "Recipes:" like any other command), and a
+non-member's `/help`/menu simply omits them, with nothing indicating
+anything was left out — the same non-enumeration guarantee `admin_only`
+commands already get, just without the admin tier's own "Admin:" label.
+
+The recipe box (below) is the first feature to use this. To gate a new
+command the same way: add `closed_only=True` to its `CommandSpec` in
+`_build_command_specs`, call `self._require_closed(update)` instead of
+`self._require_session(update)` at the top of its handler, and make sure
+any menu button that reaches it is itself only shown to a closed session
+(mirrors exactly how `admin_only` + `_require_admin` + the admin-only menu
+row already work, minus the visible "Admin:"/"🛠 Admin" labeling).
+
+### Recipe box (Closed group)
+
+A personal recipe box, not a recipe *finder* — there's no web search and no
+generation from a subject name. You paste a recipe you already have (copied
+from somewhere, typed out, or OCR'd from a photo — any shape, messy is
+fine) and Claude cleans it up into a title plus a formatted ingredients
+list and numbered steps, with a hard rule against inventing or "improving"
+any ingredient, quantity, or step that isn't in what you pasted — fidelity
+to your own recipe matters more here than it does in `/news`/`/research`,
+since there's no external source to corroborate against; your paste *is*
+the source. If nothing recognizable as a recipe was pasted, nothing is
+saved and you're asked to try again.
+
+| Command | Does |
+| --- | --- |
+| `/addrecipe` | Arms a prompt, then cleans up and saves whatever you paste next. Takes no arguments on purpose — a multi-line paste can't survive being split into space-separated command args |
+| `/getrecipes` | Lists your saved recipes by index and title |
+| `/updaterecipe <index>` | Replaces the recipe at `<index>` — paste a new one and it goes through the same cleanup pass |
+| `/removerecipe <index>` | Deletes the recipe at `<index>` immediately (no confirmation when typed as a command; the 🍳 Recipes button menu's 🗑 Remove does confirm first) |
+
+Reachable by button too — 🍳 Recipes on the main menu (closed sessions
+only) opens 📋 List / ➕ Add / 👁 View / ✏️ Update / 🗑 Remove, all editing the
+same `accounts/<id>/recipes.json` the slash commands use.
 
 ### Trivia source
 

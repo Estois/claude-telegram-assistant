@@ -23,6 +23,7 @@ from ykbot.handlers.bus import BusHandlers
 from ykbot.interests import InterestsStore
 from ykbot.message_log import MessageLogStore
 from ykbot.news_history import NewsHistoryStore
+from ykbot.recipes import RecipeStore
 from ykbot.services import BotServices
 from ykbot.trivia import FALLBACK_TRIVIA, AnimalEmoji, TriviaBook
 
@@ -34,6 +35,7 @@ __all__ = [
     "InterestsStore",
     "MessageLogStore",
     "NewsHistoryStore",
+    "RecipeStore",
     "AnimalEmoji",
     "TriviaBook",
     "FALLBACK_TRIVIA",

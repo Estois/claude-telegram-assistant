@@ -34,6 +34,7 @@ from ykbot.formatting import CommandSpec, TelegramFormatter
 from ykbot.interests import InterestsStore
 from ykbot.message_log import MessageLogStore
 from ykbot.news_history import NewsHistoryStore
+from ykbot.recipes import RecipeStore
 from ykbot import menus
 from ykbot.handlers.bus import BusHandlers
 from ykbot.services import BotServices
@@ -79,6 +80,7 @@ class YKBot:
     INTERESTS_FILENAME = "interests.md"
     BUS_LOCATIONS_FILENAME = "bus_locations.json"
     NEWS_HISTORY_FILENAME = "news_history.jsonl"
+    RECIPES_FILENAME = "recipes.json"
 
     USAGE_LIMIT_PATTERN = re.compile(r"usage limit", re.IGNORECASE)
     USAGE_LIMIT_RESET_PATTERN = re.compile(r"reset[s]?\s+(?:at|on|in)?\s*([^.\n]+)", re.IGNORECASE)
@@ -124,6 +126,9 @@ class YKBot:
 
     def _interests_for(self, account_id: str) -> InterestsStore:
         return InterestsStore(self._account_dir(account_id) / self.INTERESTS_FILENAME)
+
+    def _recipes_for(self, account_id: str) -> RecipeStore:
+        return RecipeStore(self._account_dir(account_id) / self.RECIPES_FILENAME)
 
     def _news_history_for(self, account_id: str) -> NewsHistoryStore:
         return NewsHistoryStore(self._account_dir(account_id) / self.NEWS_HISTORY_FILENAME)
@@ -211,6 +216,26 @@ class YKBot:
                 category="Interests",
             ),
             CommandSpec(
+                "addrecipe", "/addrecipe",
+                "paste a recipe to save (I'll clean it up)", self.handle_add_recipe,
+                category="Recipes", closed_only=True,
+            ),
+            CommandSpec(
+                "getrecipes", "/getrecipes",
+                "list your saved recipes", self.handle_get_recipes,
+                category="Recipes", closed_only=True,
+            ),
+            CommandSpec(
+                "updaterecipe", "/updaterecipe <index>",
+                "replace a saved recipe by pasting a new one", self.handle_update_recipe,
+                category="Recipes", closed_only=True,
+            ),
+            CommandSpec(
+                "removerecipe", "/removerecipe <index>",
+                "delete a saved recipe", self.handle_remove_recipe,
+                category="Recipes", closed_only=True,
+            ),
+            CommandSpec(
                 "bus", "/bus",
                 "bus arrival times, from a preset stop or your live location", self._bus.handle_bus,
                 category="Bus",
@@ -249,25 +274,24 @@ class YKBot:
     def _build_command_list(self, admin: bool = False, closed: bool = False) -> str:
         """The full command reference, grouped by category. Categories appear
         in the order their first command is defined, so /help stays scannable
-        as commands are added. closed_only commands get their own "Closed:"
-        section (only shown to a session in Config.closed_account_ids), same
-        treatment admin_only commands already get."""
+        as commands are added.
+
+        closed_only commands are deliberately NOT given their own labeled
+        section the way admin_only ones are — the Closed group must stay
+        invisible as a concept. A member simply sees the command folded
+        into its ordinary category (e.g. under "Recipes:"), indistinguishable
+        from any other command; a non-member sees nothing there at all, with
+        no hint that anything was left out."""
         groups: dict = {}
         for spec in self._command_specs:
-            if spec.admin_only or spec.closed_only:
+            if spec.admin_only:
+                continue
+            if spec.closed_only and not closed:
                 continue
             groups.setdefault(spec.category, []).append(f"{spec.usage} — {spec.description}")
         sections = []
         for category, entries in groups.items():
             sections.append(f"{category}:\n" + "\n".join(entries))
-        if closed:
-            closed_lines = [
-                f"{spec.usage} — {spec.description}"
-                for spec in self._command_specs
-                if spec.closed_only
-            ]
-            if closed_lines:
-                sections.append("Closed:\n" + "\n".join(closed_lines))
         if admin:
             admin_lines = [
                 f"{spec.usage} — {spec.description}"
@@ -333,10 +357,13 @@ class YKBot:
         app.add_handler(CallbackQueryHandler(self.handle_menu_bus, pattern=r"^act:bus$"))
         app.add_handler(CallbackQueryHandler(
             self.handle_menu_action,
-            pattern=r"^act:(getinterests|compile|endsession|news|summarize|addinterest|research)$"))
+            pattern=r"^act:(getinterests|compile|endsession|news|summarize|addinterest|research"
+                    r"|getrecipes|addrecipe)$"))
         app.add_handler(CallbackQueryHandler(self.handle_research_followup, pattern=r"^research:"))
         app.add_handler(CallbackQueryHandler(self.handle_interest_pick, pattern=r"^int_pick:"))
         app.add_handler(CallbackQueryHandler(self.handle_interest_select, pattern=r"^int_(rm|upd):"))
+        app.add_handler(CallbackQueryHandler(self.handle_recipe_pick, pattern=r"^rcp_pick:"))
+        app.add_handler(CallbackQueryHandler(self.handle_recipe_select, pattern=r"^rcp_(view|upd|rm):"))
         app.add_handler(CallbackQueryHandler(
             self.handle_admin_action, pattern=r"^act:(getusers|adduserteleid)$"))
         app.add_handler(CallbackQueryHandler(self.handle_admin_pick_remove, pattern=r"^adm_pick_rm$"))
@@ -573,6 +600,55 @@ class YKBot:
         )
 
     @staticmethod
+    def _build_recipe_interpret_prompt(raw_text: str) -> str:
+        """Reformats a pasted recipe — this is NOT a lookup or a generator:
+        no web search, and an explicit hard rule against inventing content,
+        since fidelity to what the user actually pasted matters more here
+        than it does in /news or /research, where there's a real source to
+        corroborate against. Here the input IS the source."""
+        return (
+            "I'm going to paste a recipe I already have. It might be messy: "
+            "copied from somewhere, OCR'd from a photo, or just typed out "
+            "quickly. Clean it up into a short title plus a clearly "
+            "formatted ingredients list and numbered steps.\n\n"
+            "Hard rule: do NOT invent, guess, or \"improve\" any ingredient, "
+            "quantity, or step that isn't present in what I pasted below — "
+            "this is my own recipe, and fidelity to it matters more than "
+            "completeness. If something is genuinely ambiguous, keep it "
+            "close to my original wording rather than resolving the "
+            "ambiguity yourself. Only include a servings/time/notes section "
+            "if that information is actually present in what I pasted.\n\n"
+            "If what I pasted below contains no recognizable recipe at all "
+            "(empty, gibberish, or something unrelated), reply with exactly "
+            "the single line NOT_A_RECIPE and nothing else.\n\n"
+            "Otherwise, begin your reply with a line reading exactly "
+            '"Title: <short title>", then a blank line, then the formatted '
+            "recipe. Format it for a Telegram message using only these HTML "
+            "tags: <b>, <i>, <u>, <s>, <code>, <pre>. Do not use Markdown "
+            "syntax. Use <b>Ingredients</b> and <b>Steps</b> as section "
+            "headers, bullet points (•) for ingredients, and numbered "
+            "steps. Escape any literal <, >, or & characters that aren't "
+            "part of a tag.\n\n"
+            f"Here is what I pasted:\n\n{raw_text}"
+        )
+
+    @staticmethod
+    def _parse_recipe_reply(reply: str) -> Optional[tuple]:
+        """Splits a recipe-interpret reply into (title, body), or None if
+        Claude signaled NOT_A_RECIPE or the reply doesn't match the
+        required "Title: ..." format (a malformed reply is treated the same
+        as an explicit refusal — never saved as a garbage recipe)."""
+        stripped = reply.strip()
+        if stripped == "NOT_A_RECIPE" or not stripped.startswith("Title:"):
+            return None
+        first_line, _, rest = stripped.partition("\n")
+        title = first_line[len("Title:"):].strip()
+        body = rest.strip()
+        if not title or not body:
+            return None
+        return title, body
+
+    @staticmethod
     def _strip_preamble(reply: str, marker: str) -> str:
         """Drop any preamble the model emits before the first line whose
         visible text — after leading whitespace and any opening HTML tags —
@@ -652,7 +728,9 @@ class YKBot:
         ))
 
     def _menu_markup(self, update: Update, account_id: str) -> InlineKeyboardMarkup:
-        return menus.top_level_keyboard(self._is_admin(update, account_id))
+        return menus.top_level_keyboard(
+            self._is_admin(update, account_id), account_id in self._config.closed_account_ids,
+        )
 
     async def handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         account_id = await self._require_session(update)
@@ -676,6 +754,11 @@ class YKBot:
         target = query.data.split(":", 1)[1]
         if target == "interests":
             await query.edit_message_text("Interests:", reply_markup=menus.interests_keyboard())
+        elif target == "recipes":
+            if account_id not in self._config.closed_account_ids:
+                await query.edit_message_text(self._trivia.next_fact())
+                return
+            await query.edit_message_text("Recipes:", reply_markup=menus.recipes_keyboard())
         elif target == "admin":
             if not self._is_admin(update, account_id):
                 await query.edit_message_text(self._trivia.next_fact())
@@ -749,6 +832,20 @@ class YKBot:
                 "Send the interest to add (a word, sentence, or paragraph):",
                 reply_markup=menus.back_keyboard("menu:interests"),
             )
+        elif action == "getrecipes":
+            if account_id not in self._config.closed_account_ids:
+                await query.edit_message_text(self._trivia.next_fact())
+                return
+            await self._do_get_recipes(update, account_id, from_menu=True)
+        elif action == "addrecipe":
+            if account_id not in self._config.closed_account_ids:
+                await query.edit_message_text(self._trivia.next_fact())
+                return
+            context.user_data["awaiting"] = {"kind": "recipe_raw", "payload": {}}
+            await query.edit_message_text(
+                "Paste the recipe you want to save — ingredients and steps, any format:",
+                reply_markup=menus.back_keyboard("menu:recipes"),
+            )
 
     async def handle_interest_pick(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -794,6 +891,69 @@ class YKBot:
                 reply_markup=menus.back_keyboard("menu:interests"),
             )
 
+    async def handle_recipe_pick(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        if account_id not in self._config.closed_account_ids:
+            await query.edit_message_text(self._trivia.next_fact())
+            return
+        action = query.data.split(":", 1)[1]  # "view", "rm", or "upd"
+        entries = await asyncio.to_thread(self._recipes_for(account_id).list)
+        if not entries:
+            await query.edit_message_text(
+                "No recipes saved yet.", reply_markup=menus.recipes_keyboard()
+            )
+            return
+        verb = {"view": "view", "rm": "remove", "upd": "update"}[action]
+        await query.edit_message_text(
+            f"Pick a recipe to {verb}:",
+            reply_markup=menus.recipe_pick_keyboard(entries, action),
+        )
+
+    async def handle_recipe_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        account_id = await self._require_session(update)
+        if account_id is None:
+            await query.answer()
+            return
+        await query.answer()
+        if account_id not in self._config.closed_account_ids:
+            await query.edit_message_text(self._trivia.next_fact())
+            return
+        action, index_str = query.data.split(":")[0].split("_")[1], query.data.split(":", 1)[1]
+        index = int(index_str)
+        entries = await asyncio.to_thread(self._recipes_for(account_id).list)
+        entry = entries[index - 1] if 1 <= index <= len(entries) else None
+        if action == "rm":
+            label = entry["name"] if entry else f"#{index}"
+            await query.edit_message_text(
+                f'Delete recipe #{index}: "{label}"?',
+                reply_markup=menus.confirm_keyboard(f"rcp_rm:{index}"),
+            )
+        elif action == "upd":
+            context.user_data["awaiting"] = {"kind": "update_recipe", "payload": {"index": index}}
+            await query.edit_message_text(
+                f"Paste the replacement recipe for #{index} (I'll clean it up the same way):",
+                reply_markup=menus.back_keyboard("menu:recipes"),
+            )
+        else:  # view
+            if entry is None:
+                await query.edit_message_text(
+                    f"Recipe #{index} no longer exists. See /getrecipes.",
+                    reply_markup=menus.recipes_keyboard(),
+                )
+                return
+            text = f"<b>{entry['name']}</b>\n\n{entry['body']}"
+            markup = menus.back_keyboard("menu:recipes")
+            try:
+                await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+            except BadRequest:
+                await query.edit_message_text(text, reply_markup=markup)
+
     async def handle_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         account_id = await self._require_session(update)
@@ -808,6 +968,11 @@ class YKBot:
         elif token.startswith("int_rm:"):
             index = int(token.split(":", 1)[1])
             await self._do_remove_interest(update, account_id, index, from_menu=True)
+        elif token.startswith("rcp_rm:"):
+            if await self._require_closed(update) is None:
+                return
+            index = int(token.split(":", 1)[1])
+            await self._do_remove_recipe(update, account_id, index, from_menu=True)
         elif token.startswith("adm_rm:"):
             if await self._require_admin(update) is None:
                 return
@@ -1137,6 +1302,171 @@ class YKBot:
             return
         await self._reply_result(update, f'Removed interest #{index}: "{removed}"', from_menu)
 
+    # -- Recipes (Closed group only — see Config.closed_account_ids) ---------
+
+    async def _interpret_recipe(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, raw_text: str,
+    ) -> Optional[tuple]:
+        """Runs the recipe-interpret prompt and parses the reply into
+        (title, body). On any failure — the Claude call itself failing, or
+        Claude signaling NOT_A_RECIPE / replying in the wrong shape — sends
+        the appropriate notice itself and returns None, so callers just
+        check for None and stop, the same shape as every other _run_claude
+        call site in this file."""
+        reply = await self._run_claude(
+            update, context, self._build_recipe_interpret_prompt(raw_text), web_tools=False,
+        )
+        if reply is None:
+            return None
+        parsed = self._parse_recipe_reply(reply)
+        if parsed is None:
+            await update.effective_message.reply_text(
+                "I couldn't find a recipe in that — try pasting the ingredients and steps again."
+            )
+            return None
+        return parsed
+
+    async def handle_add_recipe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Deliberately takes no arguments — the point is to accept a raw,
+        freeform paste (ingredients and steps in any shape), which can't
+        survive being split into space-separated command args. Arms a
+        text-capture and waits for the next message, the first slash
+        command in this file to do so (every other capture is armed only
+        from a menu-button branch)."""
+        account_id = await self._require_closed(update)
+        if account_id is None:
+            return
+        context.user_data["awaiting"] = {"kind": "recipe_raw", "payload": {}}
+        await update.message.reply_text(
+            "Paste the recipe you want to save — ingredients and steps, any format:"
+        )
+
+    async def _do_add_recipe(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        account_id: str,
+        raw_text: str,
+        from_menu: bool = False,
+    ) -> None:
+        parsed = await self._interpret_recipe(update, context, raw_text)
+        if parsed is None:
+            return
+        title, body = parsed
+        index = await asyncio.to_thread(self._recipes_for(account_id).add, title, body)
+        await self._send_formatted(
+            update, f"Saved recipe #{index}: <b>{title}</b>\n\n{body}", from_menu,
+        )
+
+    async def handle_get_recipes(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        account_id = await self._require_closed(update)
+        if account_id is None:
+            return
+        await self._do_get_recipes(update, account_id)
+
+    async def _do_get_recipes(
+        self, update: Update, account_id: str, from_menu: bool = False
+    ) -> None:
+        entries = await asyncio.to_thread(self._recipes_for(account_id).list)
+        if not entries:
+            await self._reply_result(
+                update, "No recipes saved yet. Add one with /addrecipe.", from_menu
+            )
+            return
+        listing = "\n".join(f"{i}. {e['name']}" for i, e in enumerate(entries, start=1))
+        await self._reply_result(update, f"Your recipes:\n{listing}", from_menu)
+
+    async def handle_update_recipe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        account_id = await self._require_closed(update)
+        if account_id is None:
+            return
+
+        if not context.args or not context.args[0].isdigit():
+            await update.message.reply_text(
+                "Usage: /updaterecipe <index>\nExample: /updaterecipe 2\n"
+                "See /getrecipes for the indices."
+            )
+            return
+
+        index = int(context.args[0])
+        entries = await asyncio.to_thread(self._recipes_for(account_id).list)
+        if not entries:
+            await update.message.reply_text("No recipes saved yet. Add one with /addrecipe.")
+            return
+        if not 1 <= index <= len(entries):
+            await update.message.reply_text(
+                f"No recipe #{index}. Valid range: 1-{len(entries)}. See /getrecipes."
+            )
+            return
+
+        context.user_data["awaiting"] = {"kind": "update_recipe", "payload": {"index": index}}
+        await update.message.reply_text(
+            f"Paste the replacement recipe for #{index} (I'll clean it up the same way):"
+        )
+
+    async def _do_update_recipe(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        account_id: str,
+        index: int,
+        raw_text: str,
+        from_menu: bool = False,
+    ) -> None:
+        parsed = await self._interpret_recipe(update, context, raw_text)
+        if parsed is None:
+            return
+        title, body = parsed
+        recipes = self._recipes_for(account_id)
+        updated = await asyncio.to_thread(recipes.update, index, title, body)
+        if not updated:
+            remaining = await asyncio.to_thread(recipes.list)
+            await self._reply_result(
+                update,
+                f"No recipe #{index}. Valid range: 1-{len(remaining)}. See /getrecipes.",
+                from_menu,
+            )
+            return
+        await self._send_formatted(
+            update, f"Updated recipe #{index}: <b>{title}</b>\n\n{body}", from_menu,
+        )
+
+    async def handle_remove_recipe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        account_id = await self._require_closed(update)
+        if account_id is None:
+            return
+
+        if not context.args or not context.args[0].isdigit():
+            await update.message.reply_text(
+                "Usage: /removerecipe <index>\nExample: /removerecipe 2\n"
+                "See /getrecipes for the indices."
+            )
+            return
+
+        recipes = self._recipes_for(account_id)
+        if not await asyncio.to_thread(recipes.list):
+            await update.message.reply_text("No recipes saved yet. Add one with /addrecipe.")
+            return
+
+        await self._do_remove_recipe(update, account_id, int(context.args[0]))
+
+    async def _do_remove_recipe(
+        self, update: Update, account_id: str, index: int, from_menu: bool = False
+    ) -> None:
+        recipes = self._recipes_for(account_id)
+        removed = await asyncio.to_thread(recipes.remove, index)
+        if removed is None:
+            remaining = await asyncio.to_thread(recipes.list)
+            await self._reply_result(
+                update,
+                f"No recipe #{index}. Valid range: 1-{len(remaining)}. See /getrecipes.",
+                from_menu,
+            )
+            return
+        await self._reply_result(
+            update, f'Removed recipe #{index}: "{removed["name"]}"', from_menu
+        )
+
     async def handle_compile_interests(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Manual trigger for the same reorganization the background job
         runs periodically: merge duplicate/overlapping interests and add
@@ -1388,6 +1718,26 @@ class YKBot:
                 await self._reply_result(
                     update, f"Interest #{index} no longer exists. See /getinterests.", from_menu=True
                 )
+        elif kind == "recipe_raw":
+            # Defense-in-depth, mirroring add_user_tele_id above: every site
+            # that arms this capture already gated on _require_closed, so a
+            # non-member reaching here "shouldn't" happen. If it somehow
+            # does, swallow the text silently rather than saving a recipe
+            # for someone outside the Closed group.
+            if account_id in self._config.closed_account_ids:
+                await self._do_add_recipe(update, context, account_id, text.strip(), from_menu=True)
+        elif kind == "update_recipe":
+            if account_id in self._config.closed_account_ids:
+                index = awaiting["payload"]["index"]
+                entries = await asyncio.to_thread(self._recipes_for(account_id).list)
+                if 1 <= index <= len(entries):
+                    await self._do_update_recipe(
+                        update, context, account_id, index, text.strip(), from_menu=True
+                    )
+                else:
+                    await self._reply_result(
+                        update, f"Recipe #{index} no longer exists. See /getrecipes.", from_menu=True
+                    )
         return True
 
     async def handle_plain_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

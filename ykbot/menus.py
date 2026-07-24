@@ -10,7 +10,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 HOME_BUTTON = InlineKeyboardButton("🏠 Menu", callback_data="home")
 
 
-def top_level_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
+def top_level_keyboard(is_admin: bool, is_closed: bool = False) -> InlineKeyboardMarkup:
+    """is_closed adds the 🍳 Recipes row for a Closed-group session. It must
+    stay indistinguishable from any other conditional row (compare to
+    is_admin below) — nothing about its presence or absence should look
+    different from an ordinary feature a given account does or doesn't
+    have; the Closed group itself must never be a visible concept."""
     rows = [
         [InlineKeyboardButton("🚌 Bus", callback_data="act:bus"),
          InlineKeyboardButton("📰 News", callback_data="act:news")],
@@ -19,6 +24,8 @@ def top_level_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⭐ Interests", callback_data="menu:interests"),
          InlineKeyboardButton("🔒 End session", callback_data="act:endsession")],
     ]
+    if is_closed:
+        rows.append([InlineKeyboardButton("🍳 Recipes", callback_data="menu:recipes")])
     if is_admin:
         rows.append([InlineKeyboardButton("🛠 Admin", callback_data="menu:admin")])
     return InlineKeyboardMarkup(rows)
@@ -33,6 +40,26 @@ def interests_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🗂 Compile", callback_data="act:compile")],
         [InlineKeyboardButton("⬅️ Back", callback_data="menu:root")],
     ])
+
+
+def recipes_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 List", callback_data="act:getrecipes"),
+         InlineKeyboardButton("➕ Add", callback_data="act:addrecipe")],
+        [InlineKeyboardButton("👁 View", callback_data="rcp_pick:view"),
+         InlineKeyboardButton("✏️ Update", callback_data="rcp_pick:upd")],
+        [InlineKeyboardButton("🗑 Remove", callback_data="rcp_pick:rm")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="menu:root")],
+    ])
+
+
+def recipe_pick_keyboard(entries: list, action: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(f"{i}. {entry['name'][:40]}", callback_data=f"rcp_{action}:{i}")]
+        for i, entry in enumerate(entries, start=1)
+    ]
+    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="menu:recipes")])
+    return InlineKeyboardMarkup(rows)
 
 
 def admin_keyboard() -> InlineKeyboardMarkup:
