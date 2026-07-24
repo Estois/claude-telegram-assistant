@@ -246,18 +246,28 @@ class YKBot:
             ),
         ]
 
-    def _build_command_list(self, admin: bool = False) -> str:
+    def _build_command_list(self, admin: bool = False, closed: bool = False) -> str:
         """The full command reference, grouped by category. Categories appear
         in the order their first command is defined, so /help stays scannable
-        as commands are added."""
+        as commands are added. closed_only commands get their own "Closed:"
+        section (only shown to a session in Config.closed_account_ids), same
+        treatment admin_only commands already get."""
         groups: dict = {}
         for spec in self._command_specs:
-            if spec.admin_only:
+            if spec.admin_only or spec.closed_only:
                 continue
             groups.setdefault(spec.category, []).append(f"{spec.usage} — {spec.description}")
         sections = []
         for category, entries in groups.items():
             sections.append(f"{category}:\n" + "\n".join(entries))
+        if closed:
+            closed_lines = [
+                f"{spec.usage} — {spec.description}"
+                for spec in self._command_specs
+                if spec.closed_only
+            ]
+            if closed_lines:
+                sections.append("Closed:\n" + "\n".join(closed_lines))
         if admin:
             admin_lines = [
                 f"{spec.usage} — {spec.description}"
@@ -268,13 +278,13 @@ class YKBot:
                 sections.append("Admin:\n" + "\n".join(admin_lines))
         return "\n\n".join(sections)
 
-    def _build_help_text(self, admin: bool = False) -> str:
+    def _build_help_text(self, admin: bool = False, closed: bool = False) -> str:
         minutes = self._config.session_timeout_seconds // 60
         return (
             "Every command needs an unlocked session — send the password as a plain "
             f"message first (lasts {minutes} minutes). Interests and preferred bus "
             "stops belong to whichever account your password unlocked.\n\n"
-            + self._build_command_list(admin)
+            + self._build_command_list(admin, closed)
         )
 
     def _build_welcome_text(self, name: str) -> str:
@@ -423,6 +433,22 @@ class YKBot:
         if account_id is None:
             return None
         if not self._is_admin(update, account_id):
+            await update.effective_message.reply_text(self._trivia.next_fact())
+            return None
+        return account_id
+
+    async def _require_closed(self, update: Update) -> Optional[str]:
+        """Like _require_admin, but for the Closed-group commands
+        (Config.closed_account_ids — currently amy, beth). Unlike admin, this
+        is plain account-id membership: no Telegram-user-id dual-check —
+        that extra hardening is reserved for commands that can modify other
+        accounts, not for a general feature-visibility tier. Non-members
+        (wrong account, or not even unlocked) get the same trivia reply as
+        an unrecognized command, no hint that a closed command exists."""
+        account_id = await self._require_session(update)
+        if account_id is None:
+            return None
+        if account_id not in self._config.closed_account_ids:
             await update.effective_message.reply_text(self._trivia.next_fact())
             return None
         return account_id
@@ -621,7 +647,9 @@ class YKBot:
         account_id = await self._require_session(update)
         if account_id is None:
             return
-        await update.message.reply_text(self._build_help_text(self._is_admin(update, account_id)))
+        await update.message.reply_text(self._build_help_text(
+            self._is_admin(update, account_id), account_id in self._config.closed_account_ids,
+        ))
 
     def _menu_markup(self, update: Update, account_id: str) -> InlineKeyboardMarkup:
         return menus.top_level_keyboard(self._is_admin(update, account_id))

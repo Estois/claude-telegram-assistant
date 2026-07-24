@@ -240,6 +240,27 @@ a new command only needs to be added there once to show up everywhere.
 Admin commands only render in `/help`/the welcome message for an admin
 session; everyone else's command list is unaffected by their existence.
 
+### Closed group
+
+A second, lighter-weight tier for commands that should only reach a subset
+of accounts — not full admin power, just visibility/access to a feature.
+Membership is `CLOSED_ACCOUNT_IDS` in `.env` (comma-separated account ids,
+default `amy,beth`) — plain account-id membership, no Telegram-user-id
+dual-check like the admin account gets, since that extra hardening exists
+specifically for commands that can modify *other* accounts. The admin
+account is included in the default closed list too, by convention, not by
+any special-casing in the code.
+
+No command uses this yet — it's plumbing for future features that should
+launch to a smaller group first. To gate a new command, add
+`closed_only=True` to its `CommandSpec` in `_build_command_specs` and call
+`self._require_closed(update)` instead of `self._require_session(update)`
+at the top of its handler (mirrors exactly how `admin_only` +
+`_require_admin` already work). Same non-enumeration guarantee as
+admin-only commands: a non-member gets the same animal-fact reply as an
+unrecognized command, and `closed_only` commands only render in `/help`
+for a session whose account is in `CLOSED_ACCOUNT_IDS`.
+
 ### Trivia source
 
 Wrong-password replies pull from a local cache (`trivia_cache.json`) of
@@ -480,6 +501,7 @@ Optional environment variables (see `.env.example`):
 | `ENV_FILE` | `.env` | Path `/adduserteleid` rewrites `TELEGRAM_ALLOWED_USER_IDS` in |
 | `ADMIN_ACCOUNT_ID` | `amy` | Account id allowed to use the admin commands (see Admin account) |
 | `ADMIN_TELEGRAM_USER_ID` | `100000001` | Telegram user id allowed to use the admin commands, alongside `ADMIN_ACCOUNT_ID` |
+| `CLOSED_ACCOUNT_IDS` | `amy,beth` | Comma-separated account ids allowed to use `closed_only` commands (see Closed group) |
 
 ## Security
 

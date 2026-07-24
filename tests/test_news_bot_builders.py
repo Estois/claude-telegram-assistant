@@ -6,6 +6,14 @@ class YKBotBuilderTests(BotTestCase):
     def _make_bot(self, **config_overrides):
         return bot.YKBot(make_config(self.tmp_path, **config_overrides))
 
+    def _add_closed_only_spec(self, news_bot):
+        news_bot._command_specs = news_bot._command_specs + [
+            bot.CommandSpec(
+                "secretmenu", "/secretmenu", "a closed-group-only command",
+                news_bot.handle_menu, category="Menu", closed_only=True,
+            )
+        ]
+
     def test_build_command_list_excludes_admin_only_by_default(self):
         news_bot = self._make_bot()
 
@@ -23,6 +31,35 @@ class YKBotBuilderTests(BotTestCase):
         self.assertIn("Admin:", listing)
         self.assertIn("/adduser <name> <sha256hash>", listing)
         self.assertIn("/adduserteleid", listing)
+
+    def test_build_command_list_excludes_closed_only_by_default(self):
+        news_bot = self._make_bot()
+        self._add_closed_only_spec(news_bot)
+
+        listing = news_bot._build_command_list(closed=False)
+
+        self.assertNotIn("/secretmenu", listing)
+        self.assertNotIn("Closed:", listing)
+
+    def test_build_command_list_includes_closed_section_when_closed_true(self):
+        news_bot = self._make_bot()
+        self._add_closed_only_spec(news_bot)
+
+        listing = news_bot._build_command_list(closed=True)
+
+        self.assertIn("Closed:", listing)
+        self.assertIn("/secretmenu", listing)
+
+    def test_closed_only_never_leaks_into_a_category_section(self):
+        news_bot = self._make_bot()
+        self._add_closed_only_spec(news_bot)
+
+        listing = news_bot._build_command_list(admin=True, closed=True)
+
+        # /secretmenu belongs to the "Menu" category but must appear only
+        # under "Closed:", not duplicated under "Menu:" too.
+        menu_section = listing.split("Closed:")[0]
+        self.assertNotIn("/secretmenu", menu_section)
 
     def test_build_command_list_is_grouped_by_category(self):
         news_bot = self._make_bot()

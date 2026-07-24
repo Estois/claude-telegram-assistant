@@ -44,9 +44,12 @@ class CommandSpec:
     Telegram, and how it's described in /help and the post-unlock welcome
     message — a single source of truth so a new command shows up in both
     places just by being added to YKBot._build_command_specs, with
-    nothing to keep in sync by hand. admin_only commands are registered
-    like any other (the handler itself enforces the admin check) but are
-    only listed for an admin session."""
+    nothing to keep in sync by hand. admin_only/closed_only commands are
+    registered like any other (the handler itself enforces the group check,
+    via _require_admin/_require_closed) but are only listed in /help to a
+    session in that group — admin_only to the admin session, closed_only to
+    any session in Config.closed_account_ids (which includes the admin
+    account too, since it's a superset by convention)."""
 
     name: str
     usage: str
@@ -54,4 +57,5 @@ class CommandSpec:
     handler: Callable
     category: str = "General"
     admin_only: bool = False
+    closed_only: bool = False
 

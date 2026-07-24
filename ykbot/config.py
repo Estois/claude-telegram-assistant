@@ -24,6 +24,7 @@ class Config:
     env_file: Path
     admin_account_id: str
     admin_telegram_user_id: int
+    closed_account_ids: frozenset
     claude_bin: str
     claude_workdir: str
     claude_model: Optional[str]
@@ -69,6 +70,11 @@ class Config:
             env_file=Path(os.environ.get("ENV_FILE", str(base_dir / ".env"))).resolve(),
             admin_account_id=os.environ.get("ADMIN_ACCOUNT_ID", "amy"),
             admin_telegram_user_id=int(os.environ.get("ADMIN_TELEGRAM_USER_ID", "100000001")),
+            closed_account_ids=frozenset(
+                x.strip()
+                for x in os.environ.get("CLOSED_ACCOUNT_IDS", "amy,beth").split(",")
+                if x.strip()
+            ),
             claude_bin=os.environ.get("CLAUDE_BIN", "claude"),
             claude_workdir=os.environ.get("CLAUDE_WORKDIR", str(base_dir)),
             claude_model=os.environ.get("CLAUDE_MODEL"),

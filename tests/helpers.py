@@ -181,6 +181,7 @@ def make_config(tmp_path: Path, **overrides) -> "bot.Config":
         env_file=tmp_path / ".env",
         admin_account_id="amy",
         admin_telegram_user_id=100000001,
+        closed_account_ids=frozenset({"amy", "beth"}),
         claude_bin="claude",
         claude_workdir=str(tmp_path),
         claude_model=None,
