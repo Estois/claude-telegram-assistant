@@ -92,8 +92,9 @@ commands keep working unchanged, and `/help` stays slash-only (it's not on
 the board).
 
 The top-level board has 🚌 Bus, 📰 News, 🔬 Research, 🔗 Summarize,
-⭐ Interests, and 🔒 End session, plus a 🛠 Admin row shown only to an admin
-session. Bus opens the same fav-stop menu as `/bus`. News, Research,
+⭐ Interests, and 🔒 End session, plus a 🍳 Recipes row shown only to a
+Closed-group session (see Closed group below) and a 🛠 Admin row shown only
+to an admin session. Bus opens the same fav-stop menu as `/bus`. News, Research,
 Summarize, and Interests → ➕ Add each arm a one-shot capture and prompt for
 text — your next plain message is read as that command's argument instead
 of a password attempt. End session asks for a ✅ Yes/❌ No confirmation
@@ -124,6 +125,13 @@ interest to pick from; Remove then asks for a Yes/No confirmation, Update
 prompts for the replacement wording (same "revise or replace" behavior as
 `/updateinterests`).
 
+Tapping 🍳 Recipes (Closed-group sessions only) opens a submenu: 📋 List,
+➕ Add, 👁 View, ✏️ Update, 🗑 Remove, and ⬅️ Back. View, Update, and Remove
+each first show one button per saved recipe to pick from — View then shows
+the full recipe inline, Remove asks for a Yes/No confirmation, Update
+prompts you to paste a replacement (goes through the same Claude cleanup
+pass as ➕ Add). See Recipe box below for what the cleanup actually does.
+
 Tapping 🛠 Admin (admin sessions only) opens 👥 Get users, 🗑 Remove user,
 🆔 Allow Telegram id, and ⬅️ Back. Remove user shows one button per
 removable account, then a Yes/No confirmation. Allow Telegram id prompts
@@ -131,15 +139,16 @@ for the id, same as `/adduserteleid`. Adding a new account with a password
 hash stays slash-only (`/adduser <name> <sha256hash>`) — there's no
 sensible way to type a hash through a button flow.
 
-Every button action re-checks the session server-side (and admin actions
-re-check admin) exactly like the slash command it mirrors — a button only
-being visible to the right session doesn't mean the underlying handler
-trusts that; it never does.
+Every button action re-checks the session server-side (admin actions
+re-check admin, Recipes actions re-check Closed-group membership) exactly
+like the slash command it mirrors — a button only being visible to the
+right session doesn't mean the underlying handler trusts that; it never
+does.
 
 ### Code layout
 
 `bot.py` is a thin entry-point shim; the implementation lives in `ykbot/`.
-Service classes (accounts, claude, interests, bus, trivia, formatting, menus)
+Service classes (accounts, claude, interests, recipes, bus, trivia, formatting, menus)
 each own one concern. `ykbot/app.py` holds the `YKBot` orchestrator: wiring,
 handler registration, the command list, auth, and the shared reply helpers.
 
@@ -539,7 +548,9 @@ Optional environment variables (see `.env.example`):
 **Claude runs with no host access.** Every `claude -p` call is launched with
 `--tools` restricted to a hard allowlist — only `WebSearch`/`WebFetch` for
 `/news`, `/research` (including its depth/breadth follow-ups), and
-`/summarize`, and *no tools at all* for the interest commands. `Bash`, `Read`,
+`/summarize`, and *no tools at all* for the interest and recipe commands
+(the recipe cleanup pass is pure reformatting of what you pasted — it never
+searches the web). `Bash`, `Read`,
 `Write`, and `Edit` are never available, so a prompt injection (via a `/news`
 subject, an interest entry, etc.) cannot be turned into file access or shell
 commands on the machine. (`--tools` limits tool *availability* even under
